@@ -7,6 +7,7 @@ import { StatusBar } from 'react-native';
 import Login from './src/pages/Login';
 import Cadastro from './src/pages/Cadastro';
 import Home from './src/pages/Home';
+import NovoInvestimento from './src/pages/NovoInvestimento';
 
 // Cria o nosso navegador do tipo "pilha"
 const Stack = createStackNavigator();
@@ -29,6 +30,11 @@ export default function App() {
         <Stack.Screen
           name="Home"
           component={Home}
+          options={{ headerShown: false }}
+        />
+         <Stack.Screen
+          name="NovoInvestimento"
+          component={NovoInvestimento}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>

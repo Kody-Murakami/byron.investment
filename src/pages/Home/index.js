@@ -49,7 +49,7 @@ function Home() {
   };
 
   const handleNovo = () => {
-    console.log('Clicou em + Novo');
+    navigation.navigate('NovoInvestimento');
   };
 
   const handleNavigateDashboard = () => {
