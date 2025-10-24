@@ -19,6 +19,10 @@ import {
 function Login() {
   const navigation = useNavigation(); 
 
+   function handleLogin() {
+    navigation.navigate('Home'); 
+  }
+
   return (
     <Background>
       <Container behavior={Platform.OS === 'ios' ? 'padding' : ''} enabled>
@@ -31,7 +35,7 @@ function Login() {
           <Input placeholder="********" placeholderTextColor="#A9A9A9" secureTextEntry={true} />
 
 
-          <SubmitButton activeOpacity={0.8}>
+          <SubmitButton activeOpacity={0.8} onPress={handleLogin}>
             <SubmitText>Entrar</SubmitText>
           </SubmitButton>
 
