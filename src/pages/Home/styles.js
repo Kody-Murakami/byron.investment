@@ -116,6 +116,13 @@ export const IconButton = styled.TouchableOpacity`
   padding: 5px;
 `;
 
+export const EmptyTableText = styled.Text`
+  font-size: 14px;
+  color: #777; /* Cinza um pouco mais escuro */
+  text-align: center;
+  padding: 20px 10px; /* Espaçamento para o texto não ficar colado */
+`;
+
 export const FabButton = styled.TouchableOpacity`
   position: absolute;
   bottom: 80px; /* Posição acima da nav inferior */
@@ -130,11 +137,8 @@ export const FabButton = styled.TouchableOpacity`
   shadow-color: #000;
   shadow-opacity: 0.3;
   shadow-radius: 4px;
-
-  /* ***** INÍCIO DA CORREÇÃO ***** */
   shadow-offset-width: 0;
   shadow-offset-height: 2;
-  /* ***** FIM DA CORREÇÃO ***** */
 `;
 
 export const FabText = styled.Text`

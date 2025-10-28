@@ -1,7 +1,9 @@
-import React, { useState } from 'react'; // 1. Importar o useState
-import { ScrollView, RefreshControl } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useState, useCallback } from 'react';
+import { ScrollView, RefreshControl, Alert, ActivityIndicator } from 'react-native';
+// useFocusEffect é chamado toda vez que a tela entra em foco
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Feather from 'react-native-vector-icons/Feather';
+import api from '../../services/api'; // Importamos a nossa API
 
 import {
   Background,
@@ -19,7 +21,7 @@ import {
   ColumnHeader,
   TableRow,
   TableCell,
-  TableCellValorizacao,
+  TableCellValorizacao, // Vamos manter este estilo, mas o nome é figurativo
   TableCellAtivos,
   IconButton,
   FabButton,
@@ -29,63 +31,96 @@ import {
   NavText,
   NavCenterButton,
   NavCenterLogo,
-  EmptyTableText, 
+  EmptyTableText,
 } from './styles';
-
-const carteiraMock = [
-  {
-    id: '1',
-    ticker: 'PETR4',
-    nome: 'Petrobras',
-    cotacao: 38.50,
-    valorizacao: 2.5,
-    patrimonio: 5000.00,
-  },
-  {
-    id: '2',
-    ticker: 'MGLU3',
-    nome: 'Magazine Luiza',
-    cotacao: 12.10,
-    valorizacao: -1.2,
-    patrimonio: 1500.00,
-  }
-];
-
-const destaqueMock = [
-  { id: '1', ticker: 'VIIA3', valorizacao: 10.2 },
-  { id: '2', ticker: 'IRBR3', valorizacao: -5.1 },
-];
 
 function Home() {
   const navigation = useNavigation();
+  
+  // States para os dados reais e para o loading
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [carteira, setCarteira] = useState([]); // <-- O estado inicial é um array
+  // O seu backend não tem uma rota para "destaques", então vamos deixar vazio
+  const [destaque, setDestaque] = useState([]); 
 
-  const [carteira, setCarteira] = useState(carteiraMock);
-  const [destaque, setDestaque] = useState(destaqueMock);
+  // Esta função busca os dados no backend
+  async function carregarDados() {
+    // Não precisamos setar o loading principal se for só um "refresh"
+    if (!refreshing) {
+      setLoading(true);
+    }
 
+    try {
+      // O token já foi adicionado no Login, então a API já está autorizada
+      const response = await api.get('/investimentos');
+      
+      // ================== A CORREÇÃO ESTÁ AQUI ==================
+      // Verificamos se 'response.data' é um array. 
+      // Se não for (ex: se for 'undefined'), usamos um array vazio [].
+      setCarteira(Array.isArray(response.data) ? response.data : []);
+      // ==========================================================
+
+    } catch (err) {
+      const errorMessage = err.response?.data?.message || "Não foi possível carregar seus investimentos.";
+      Alert.alert("Erro", errorMessage);
+      setCarteira([]); // Se der erro, também garantimos que é um array vazio
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  // O useFocusEffect vai chamar o carregarDados() toda vez que a tela Home for exibida
+  useFocusEffect(
+    useCallback(() => {
+      carregarDados();
+    }, [])
+  );
+
+  // Função para o "Puxar para atualizar"
   const onRefresh = () => {
     setRefreshing(true);
-
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    carregarDados();
   };
 
   const handleLogout = () => {
+    // Limpa o token da API e volta para o Login
+    api.defaults.headers.common['Authorization'] = null;
     navigation.navigate('Login');
   };
 
   const handleEdit = (item) => {
-    console.log('Editar item:', item.id);
+    // Enviamos o item *inteiro* para a tela de Edição
     navigation.navigate('EditarInvestimento', {
-      investmentId: item.id,
-      investmentName: item.ticker, 
+      investimento: item,
     });
   };
 
   const handleDelete = (id) => {
-    console.log('Deletar:', id);
-    // Aqui você implementaria a lógica de deleção
+    Alert.alert(
+      "Excluir Investimento",
+      "Tem certeza que deseja excluir este item?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Excluir",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Chama a rota de delete do backend
+              await api.delete(`/investimentos/${id}`);
+              Alert.alert("Sucesso", "Investimento excluído.");
+              // Atualiza a lista, removendo o item excluído
+              setCarteira(carteira.filter(item => item.id !== id));
+            } catch (err) {
+              const errorMessage = err.response?.data?.message || "Não foi possível excluir o investimento.";
+              Alert.alert("Erro", errorMessage);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleNovo = () => {
@@ -96,6 +131,15 @@ function Home() {
     console.log('Navegar para Dashboard');
     // navigation.navigate('Dashboard');
   };
+  
+  // Se estiver a carregar pela primeira vez, mostra um spinner
+  if (loading) {
+    return (
+      <Background style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+        <ActivityIndicator size="large" color="#56949F" />
+      </Background>
+    );
+  }
 
   return (
     <Background>
@@ -110,14 +154,18 @@ function Home() {
       <ScrollView
         contentContainerStyle={{ flexGrow: 1, paddingBottom: 150 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#56949F"]} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh} 
+            colors={["#56949F"]} 
+          />
         }
       >
         <ContentContainer>
           <WelcomeTitle>Bem-vindo!</WelcomeTitle>
           <WelcomeSubtitle>Resumo da sua carteira</WelcomeSubtitle>
 
-          {/* Card: Destaques */}
+          {/* Card: Destaques (Sem API, por enquanto) */}
           <Card>
             <CardTitle>Destaques do dia</CardTitle>
             <Table>
@@ -125,8 +173,6 @@ function Home() {
                 <ColumnHeader flex={2}>Ticker</ColumnHeader>
                 <ColumnHeader flex={1}>Valorização</ColumnHeader>
               </TableHeader>
-
-              {/* 4. Descomentado e usando os dados mock de 'destaque' */}
               {destaque.length === 0 ? (
                 <EmptyTableText>Nenhum destaque hoje.</EmptyTableText>
               ) : (
@@ -142,30 +188,32 @@ function Home() {
             </Table>
           </Card>
 
-          {/* Card: Carteira de ações */}
+          {/* Card: Carteira de ações (Dados Reais da API) */}
           <Card>
             <CardTitle>Carteira de ações</CardTitle>
             <Table>
               <TableHeader>
+                {/* Ajustamos as colunas para os dados do seu backend */}
                 <ColumnHeader flex={1.5}>Ticker</ColumnHeader>
-                <ColumnHeader flex={1}>Cotação</ColumnHeader>
-                <ColumnHeader flex={1}>Valoriz.</ColumnHeader>
-                <ColumnHeader flex={1.5}>Patrimônio</ColumnHeader>
-                <ColumnHeader flex={1.5}>Ativos</ColumnHeader>
+                <ColumnHeader flex={2}>Nome</ColumnHeader>
+                <ColumnHeader flex={1}>Qtd.</ColumnHeader>
+                <ColumnHeader flex={1.5}>Preço Médio</ColumnHeader>
+                <ColumnHeader flex={1.5}>Ações</ColumnHeader>
               </TableHeader>
-
-              {/* 4. Descomentado e usando os dados mock de 'carteira' */}
+              
+              {/*
+                Agora, se 'carteira' for '[]', o .map() não vai rodar 
+                e o <EmptyTableText> será mostrado, sem crashar o app.
+              */}
               {carteira.length === 0 ? (
                 <EmptyTableText>Nenhuma ação na carteira.</EmptyTableText>
               ) : (
                 carteira.map((item) => (
                   <TableRow key={item.id}>
                     <TableCell flex={1.5}>{item.ticker}</TableCell>
-                    <TableCell flex={1}>R${item.cotacao.toFixed(2)}</TableCell>
-                    <TableCellValorizacao flex={1} positive={item.valorizacao >= 0}>
-                      {item.valorizacao.toFixed(1)}%
-                    </TableCellValorizacao>
-                    <TableCell flex={1.5}>R${item.patrimonio.toFixed(2)}</TableCell>
+                    <TableCell flex={2} style={{textAlign: 'left'}}>{item.nome}</TableCell>
+                    <TableCell flex={1}>{item.quantidade}</TableCell>
+                    <TableCell flex={1.5}>R${item.preco_medio.toFixed(2)}</TableCell>
                     
                     {/* Botões de Editar e Deletar */}
                     <TableCellAtivos flex={1.5}>
