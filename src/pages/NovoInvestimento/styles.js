@@ -15,10 +15,9 @@ export const Header = styled.View`
   border-bottom-color: #56949F;
 `;
 
-export const LogoImage = styled.Image`
+export const LogoImage = styled.Image.attrs({ resizeMode: 'contain' })`
   width: 120px;
   height: 40px;
-  resize-mode: contain;
 `;
 
 export const LogoutButton = styled.TouchableOpacity`
@@ -34,53 +33,72 @@ export const LogoutText = styled.Text`
 `;
 
 export const ContentContainer = styled.KeyboardAvoidingView`
-  flex: 1;
   padding: 20px;
-  align-items: flex-start; /* Alinha o conteúdo à esquerda */
+  padding-bottom: 100px;
 `;
 
 export const BackButton = styled.TouchableOpacity`
   flex-direction: row;
   align-items: center;
   margin-bottom: 20px;
+  align-self: flex-start;
 `;
 
 export const BackButtonText = styled.Text`
   font-size: 16px;
   color: #E6E6E6;
-  margin-left: 5px;
+  margin-left: 8px;
 `;
 
 export const Title = styled.Text`
   font-size: 24px;
   font-weight: bold;
   color: #FFF;
-  margin-bottom: 30px; /* Mais espaço após o título */
-  align-self: flex-start;
+  margin-bottom: 25px;
+  text-align: center;
 `;
 
 export const Label = styled.Text`
   font-size: 16px;
   color: #E6E6E6;
-  align-self: flex-start;
-  margin-bottom: 5px;
-  margin-left: 0; /* Certifica que está alinhado à esquerda */
-  width: 100%; /* Para que o label ocupe a largura total e o input comece na mesma linha */
+  margin-bottom: 8px;
+  margin-left: 5px;
 `;
 
 export const Input = styled.TextInput`
   background-color: #FFF;
   width: 100%;
   font-size: 16px;
-  padding: 10px;
+  padding: 12px 15px;
   border-radius: 10px;
   border-width: 2px;
   border-color: #56949F;
   color: #121212;
-  margin-bottom: 20px; /* Mais espaço entre os inputs */
+  margin-bottom: 15px;
 `;
 
-export const SubmitButton = styled.TouchableOpacity`
+export const ReadOnlyBox = styled.View`
+  background-color: #F3F3F3;
+  width: 100%;
+  padding: 12px 15px;
+  border-radius: 10px;
+  border-width: 2px;
+  border-color: #CFCFCF;
+  margin-bottom: 15px;
+`;
+
+export const ReadOnlyText = styled.Text`
+  font-size: 16px;
+  color: #444;
+`;
+
+export const CurrentValueText = styled.Text`
+  color: #CFE7CF;
+  margin-top: 6px;
+  margin-bottom: 8px;
+`;
+
+export const SubmitButton = styled.TouchableOpacity.attrs({ activeOpacity: 0.85 })`
   width: 100%;
   height: 50px;
   background-color: #56949F;
@@ -90,10 +108,10 @@ export const SubmitButton = styled.TouchableOpacity`
   margin-top: 20px;
   elevation: 3;
   shadow-color: #000;
-  shadow-opacity: 0.2;
+  shadow-opacity: 0.25;
   shadow-radius: 3px;
-  shadow-offset-width: 0;
-  shadow-offset-height: 2;
+
+  flex-direction: row;
 `;
 
 export const SubmitText = styled.Text`
@@ -102,6 +120,7 @@ export const SubmitText = styled.Text`
   font-weight: bold;
 `;
 
+/* Bottom nav */
 export const BottomNav = styled.View`
   position: absolute;
   bottom: 0;
@@ -120,19 +139,21 @@ export const NavButton = styled.TouchableOpacity`
   flex: 1;
   align-items: center;
   justify-content: center;
-  background-color: ${(props) => (props.active ? '#DDEBEC' : 'transparent')};
-  border-radius: ${(props) => (props.active ? '10px' : '0px')};
+  background-color: ${(p) => (p.active ? '#DDEBEC' : 'transparent')};
+  border-radius: ${(p) => (p.active ? 10 : 0)}px;
   margin: 5px;
   height: 45px;
 `;
 
 export const NavText = styled.Text`
   font-size: 14px;
-  color: ${(props) => (props.active ? '#0D202B' : '#A9A9A9')};
-  font-weight: ${(props) => (props.active ? 'bold' : 'normal')};
+  color: ${(p) => (p.active ? '#0D202B' : '#A9A9A9')};
+  font-weight: ${(p) => (p.active ? 'bold' : 'normal')};
 `;
 
-export const NavCenterButton = styled.TouchableOpacity`
+export const NavCenterButton = styled.TouchableOpacity.attrs({
+  style: { shadowOffset: { width: 0, height: -1 } },
+})`
   align-items: center;
   justify-content: center;
   width: 70px;
@@ -146,12 +167,37 @@ export const NavCenterButton = styled.TouchableOpacity`
   shadow-radius: 3px;
   border-width: 1px;
   border-color: #DDD;
-  shadow-offset-width: 0;
-  shadow-offset-height: -1;
 `;
 
-export const NavCenterLogo = styled.Image`
+export const NavCenterLogo = styled.Image.attrs({ resizeMode: 'contain' })`
   width: 60px;
   height: 60px;
-  resize-mode: contain;
+`;
+
+/* Dropdown do autocomplete */
+export const SuggestionContainer = styled.View`
+  position: absolute;
+  z-index: 9999;
+  elevation: 9;
+
+  background-color: #FFF;
+  border-radius: 8px;
+  border-width: 1px;
+  border-color: #CCC;
+  max-height: 220px;
+
+  shadow-color: #000;
+  shadow-opacity: 0.15;
+  shadow-radius: 6px;
+`;
+
+export const SuggestionItem = styled.TouchableOpacity`
+  padding: 12px 15px;
+  border-bottom-width: 1px;
+  border-bottom-color: #EEE;
+`;
+
+export const SuggestionText = styled.Text`
+  font-size: 14px;
+  color: #333;
 `;
