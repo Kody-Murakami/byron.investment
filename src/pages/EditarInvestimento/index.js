@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import axios from 'axios';
-import { LogOut, ArrowLeft, Save } from 'lucide-react-native';
+import Feather from 'react-native-vector-icons/Feather'; // << trocado
 import api from '../../services/api';
 
 import {
@@ -67,7 +67,6 @@ const uniqueByTicker = (arr) => {
   });
 };
 
-// tenta v2/search e, se vazio, quote/list?search=
 async function fetchBrapiSuggestions(q) {
   const out = [];
   try {
@@ -94,11 +93,9 @@ export default function EditarInvestimento() {
   const navigation = useNavigation();
   const route = useRoute();
 
-  // aceita diferentes nomes de ID
   const { investmentId, id, _id, investimentoId } = route.params || {};
   const currentId = investmentId ?? id ?? _id ?? investimentoId ?? null;
 
-  // form
   const [nome, setNome] = useState('');
   const [ticker, setTicker] = useState('');
   const [quantidade, setQuantidade] = useState('');
@@ -107,7 +104,6 @@ export default function EditarInvestimento() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // preço médio auto
   const avgPrice = useMemo(() => {
     const q = parseFloat(String(quantidade).replace(',', '.'));
     const inv = parseFloat(String(valorInvestido).replace(',', '.'));
@@ -115,10 +111,8 @@ export default function EditarInvestimento() {
     return inv / q;
   }, [quantidade, valorInvestido]);
 
-  // preço atual (opcional)
   const [currentPrice, setCurrentPrice] = useState(null);
 
-  // autocomplete
   const [nameSuggestions, setNameSuggestions] = useState([]);
   const [tickerSuggestions, setTickerSuggestions] = useState([]);
   const [showNameSuggestions, setShowNameSuggestions] = useState(false);
@@ -126,7 +120,6 @@ export default function EditarInvestimento() {
   const [nameFetching, setNameFetching] = useState(false);
   const [tickerFetching, setTickerFetching] = useState(false);
 
-  // posições dos dropdowns
   const [nameDrop, setNameDrop] = useState({ x: 0, y: 0, w: 0 });
   const [tickerDrop, setTickerDrop] = useState({ x: 0, y: 0, w: 0 });
 
@@ -141,7 +134,6 @@ export default function EditarInvestimento() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   };
 
-  // carrega investimento
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -166,34 +158,23 @@ export default function EditarInvestimento() {
         if (alive) setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [currentId]);
 
-  // preço atual quando muda o ticker
   useEffect(() => {
     let alive = true;
     (async () => {
       const tk = (ticker || '').trim().toUpperCase();
-      if (!tk) {
-        setCurrentPrice(null);
-        return;
-      }
+      if (!tk) { setCurrentPrice(null); return; }
       try {
         const { data } = await axios.get(`${BRAPI_QUOTE}/${encodeURIComponent(tk)}`);
         const p = data?.results?.[0]?.regularMarketPrice ?? data?.results?.[0]?.close ?? null;
         if (alive) setCurrentPrice(p != null ? Number(p) : null);
-      } catch {
-        if (alive) setCurrentPrice(null);
-      }
+      } catch { if (alive) setCurrentPrice(null); }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [ticker]);
 
-  // listas com "usar o digitado"
   const nameListWithTyped = useMemo(() => {
     const typed = (nome || '').trim();
     const base = Array.isArray(nameSuggestions) ? nameSuggestions : [];
@@ -210,14 +191,9 @@ export default function EditarInvestimento() {
     return [{ stock: typed, name: nome || '', _origin: 'typed' }, ...withoutDup].slice(0, 8);
   }, [ticker, tickerSuggestions, nome]);
 
-  // buscar por NOME
   useEffect(() => {
     const qRaw = (nome || '').trim();
-    if (!qRaw) {
-      setNameSuggestions([]);
-      setShowNameSuggestions(false);
-      return;
-    }
+    if (!qRaw) { setNameSuggestions([]); setShowNameSuggestions(false); return; }
     setShowNameSuggestions(true);
 
     const q = norm(qRaw);
@@ -228,32 +204,22 @@ export default function EditarInvestimento() {
         list = list
           .filter((it) => it.name && norm(it.name).includes(q))
           .sort((a, b) => {
-            const an = norm(a.name),
-              bn = norm(b.name);
+            const an = norm(a.name), bn = norm(b.name);
             const aStarts = an.startsWith(q) ? 0 : 1;
             const bStarts = bn.startsWith(q) ? 0 : 1;
             if (aStarts !== bStarts) return aStarts - bStarts;
             return an.localeCompare(bn);
           });
         setNameSuggestions(list.slice(0, 12));
-      } catch {
-        setNameSuggestions([]);
-      } finally {
-        setNameFetching(false);
-      }
+      } catch { setNameSuggestions([]); }
+      finally { setNameFetching(false); }
     }, 250);
-
     return () => clearTimeout(t);
   }, [nome]);
 
-  // buscar por TICKER
   useEffect(() => {
     const qRaw = (ticker || '').trim().toUpperCase();
-    if (!qRaw) {
-      setTickerSuggestions([]);
-      setShowTickerSuggestions(false);
-      return;
-    }
+    if (!qRaw) { setTickerSuggestions([]); setShowTickerSuggestions(false); return; }
     setShowTickerSuggestions(true);
 
     const t = setTimeout(async () => {
@@ -269,17 +235,12 @@ export default function EditarInvestimento() {
             return a.stock.localeCompare(b.stock);
           });
         setTickerSuggestions(list.slice(0, 12));
-      } catch {
-        setTickerSuggestions([]);
-      } finally {
-        setTickerFetching(false);
-      }
+      } catch { setTickerSuggestions([]); }
+      finally { setTickerFetching(false); }
     }, 250);
-
     return () => clearTimeout(t);
   }, [ticker]);
 
-  // seleção
   const handleSelectFromName = (item) => {
     if (item.name) setNome(item.name);
     if (item.stock) setTicker(item.stock);
@@ -293,7 +254,6 @@ export default function EditarInvestimento() {
     Keyboard.dismiss();
   };
 
-  // navegação / submit
   const handleLogout = () => {
     api.defaults.headers.common['Authorization'] = null;
     navigation.navigate('Login');
@@ -303,13 +263,9 @@ export default function EditarInvestimento() {
   const handleNavigateDashboard = () => console.log('Navegar para Dashboard');
 
   const handleSalvar = async () => {
-    if (!currentId) {
-      Alert.alert('Erro', 'ID do investimento não informado.');
-      return;
-    }
+    if (!currentId) { Alert.alert('Erro', 'ID do investimento não informado.'); return; }
     if (!nome || !ticker || !quantidade || !valorInvestido || !dataInvestimento) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos.');
-      return;
+      Alert.alert('Erro', 'Por favor, preencha todos os campos.'); return;
     }
 
     setSaving(true);
@@ -321,21 +277,15 @@ export default function EditarInvestimento() {
         investedValue: parseFloat(String(valorInvestido).replace(',', '.')),
         dateInvested: new Date(dataInvestimento),
       };
-
-      try {
-        await api.put(`/investimentos/${currentId}`, payload);
-      } catch {
-        await api.patch(`/investimentos/${currentId}`, payload);
-      }
+      try { await api.put(`/investimentos/${currentId}`, payload); }
+      catch { await api.patch(`/investimentos/${currentId}`, payload); }
 
       Alert.alert('Sucesso', 'Investimento atualizado!');
       navigation.navigate('Home');
     } catch (err) {
       const msg = err?.response?.data?.message || err.message || 'Não foi possível atualizar.';
       Alert.alert('Erro', msg);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   return (
@@ -345,20 +295,19 @@ export default function EditarInvestimento() {
           <LogoImage source={require('../../imgs/Logo-semfundo.png')} />
           <LogoutButton onPress={handleLogout}>
             <LogoutText>Sair</LogoutText>
-            <LogOut size={18} color="#56949F" />
+            <Feather name="log-out" size={18} color="#56949F" /> {/* << trocado */}
           </LogoutButton>
         </Header>
 
         <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 150 }} keyboardShouldPersistTaps="handled">
           <ContentContainer behavior={Platform.OS === 'ios' ? 'padding' : undefined} enabled>
             <BackButton onPress={handleGoBack}>
-              <ArrowLeft size={20} color="#E6E6E6" />
+              <Feather name="arrow-left" size={20} color="#E6E6E6" /> {/* << trocado */}
               <BackButtonText>voltar</BackButtonText>
             </BackButton>
 
             <Title>{loading ? 'Carregando…' : 'Editar investimento'}</Title>
 
-            {/* Nome + autocomplete */}
             <Label>Nome do investimento</Label>
             <Input
               placeholder="Ex: Petrobras, Magazine Luiza"
@@ -388,7 +337,6 @@ export default function EditarInvestimento() {
               </SuggestionContainer>
             )}
 
-            {/* Ticker + autocomplete */}
             <Label>Ticker</Label>
             <Input
               placeholder="Ex: PETR4, MGLU3"
@@ -421,7 +369,6 @@ export default function EditarInvestimento() {
               </SuggestionContainer>
             )}
 
-            {/* Quantidade */}
             <Label>Quantidade</Label>
             <Input
               placeholder="Ex: 100"
@@ -432,7 +379,6 @@ export default function EditarInvestimento() {
               editable={!loading}
             />
 
-            {/* Valor investido */}
             <Label>Valor investido</Label>
             <Input
               placeholder="R$ (Ex: 3850.00)"
@@ -443,13 +389,11 @@ export default function EditarInvestimento() {
               editable={!loading}
             />
 
-            {/* Preço médio (auto) */}
             <Label>Preço médio (auto)</Label>
             <ReadOnlyBox>
               <ReadOnlyText>R$ {isFinite(avgPrice) ? avgPrice.toFixed(2) : '0.00'}</ReadOnlyText>
             </ReadOnlyBox>
 
-            {/* Data */}
             <Label>Data do Investimento</Label>
             <Input
               placeholder="AAAA-MM-DD (Ex: 2025-10-28)"
@@ -459,7 +403,6 @@ export default function EditarInvestimento() {
               editable={!loading}
             />
 
-            {/* Preço atual (se disponível) */}
             {currentPrice != null && (
               <CurrentValueText>Preço atual (BRAPI): R$ {Number(currentPrice).toFixed(2)}</CurrentValueText>
             )}
@@ -467,7 +410,7 @@ export default function EditarInvestimento() {
             <SubmitButton onPress={handleSalvar} disabled={saving || loading} activeOpacity={0.85}>
               {saving ? <ActivityIndicator color="#FFF" /> : (
                 <>
-                  <Save size={18} color="#FFF" />
+                  <Feather name="save" size={18} color="#FFF" /> {/* << trocado */}
                   <SubmitText style={{ marginLeft: 8 }}>Salvar</SubmitText>
                 </>
               )}

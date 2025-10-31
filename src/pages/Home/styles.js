@@ -1,211 +1,184 @@
 import styled from 'styled-components/native';
 
-export const Background = styled.SafeAreaView`
+export const Background = styled.View`
   flex: 1;
-  background-color: #0D202B;
+  background-color: #0f2c33;
 `;
 
-/* ===== HEADER ===== */
 export const Header = styled.View`
+  padding: 16px 20px;
+  background-color: #ffffff;
   flex-direction: row;
-  justify-content: space-between;
   align-items: center;
-  padding: 10px 20px;
-  background-color: #F8F8F8;
-  border-bottom-width: 2px;
-  border-bottom-color: #56949F;
+  justify-content: space-between;
 `;
 
-export const LogoImage = styled.Image.attrs({
-  resizeMode: 'contain',
-})`
-  width: 120px;
-  height: 40px;
+export const LogoImage = styled.Image`
+  width: 110px;
+  height: 28px;
+  resize-mode: contain;
 `;
 
 export const LogoutButton = styled.TouchableOpacity`
   flex-direction: row;
   align-items: center;
+  gap: 8px;
 `;
 
 export const LogoutText = styled.Text`
-  font-size: 16px;
-  color: #56949F;
-  margin-right: 5px;
-  font-weight: 500;
+  color: #56949f;
+  font-size: 14px;
+  margin-right: 6px;
 `;
 
-/* ===== CONTEÚDO ===== */
-export const ContentContainer = styled.View`
-  padding: 20px;
+export const ContentContainer = styled.KeyboardAvoidingView`
+  flex: 1;
+  padding: 18px;
 `;
 
 export const WelcomeTitle = styled.Text`
-  font-size: 24px;
-  font-weight: bold;
-  color: #FFF;
-  margin-bottom: 5px;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 8px;
 `;
 
 export const WelcomeSubtitle = styled.Text`
-  font-size: 16px;
-  color: #E6E6E6;
-  margin-bottom: 20px;
+  color: #e5f0f2;
+  font-size: 12px;
+  margin-bottom: 12px;
 `;
 
-/* ===== CARD ===== */
 export const Card = styled.View`
-  background-color: #E6E6E6;
-  border-radius: 15px;
-  padding: 15px;
-  margin-bottom: 20px;
-  width: 100%;
+  background-color: #e6e6e6;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 14px;
+  shadow-color: #000;
+  shadow-opacity: 0.08;
+  shadow-radius: 8px;
+  elevation: 2;
 `;
 
 export const CardTitle = styled.Text`
-  font-size: 18px;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 15px;
+  color: #333333;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
 `;
 
-/* ===== TABELA ===== */
 export const Table = styled.View`
-  width: 100%;
+  background-color: #d9d9d9;
+  border-radius: 8px;
+  overflow: hidden;
 `;
 
 export const TableHeader = styled.View`
+  background-color: #8f8f8f;
   flex-direction: row;
-  background-color: #CCCCCC;
-  padding: 10px 5px;
-  border-top-left-radius: 5px;
-  border-top-right-radius: 5px;
+  padding: 8px 10px;
 `;
 
 export const ColumnHeader = styled.Text`
-  font-size: 11px;
-  font-weight: bold;
-  color: #555;
-  flex: ${(props) => props.flex || 1};
-  text-align: left;
+  flex: ${p => p.flex || 1};
+  color: #f2f2f2;
+  font-weight: 700;
+  font-size: 12px;
 `;
 
 export const TableRow = styled.View`
   flex-direction: row;
-  padding: 12px 5px;
-  border-bottom-width: 1px;
-  border-bottom-color: #CCC;
   align-items: center;
+  padding: 10px;
+  border-top-width: 1px;
+  border-top-color: #cfcfcf;
+  background-color: #e6e6e6;
 `;
 
 export const TableCell = styled.Text`
+  flex: ${p => p.flex || 1};
+  color: #2f2f2f;
   font-size: 14px;
-  color: #333;
-  flex: ${(props) => props.flex || 1};
-  text-align: left;
 `;
 
 export const TableCellValorizacao = styled(TableCell)`
-  font-weight: bold;
-  color: ${(props) => (props.positive ? '#008000' : '#D00000')};
+  color: ${p => (p.positive ? '#0a9b43' : '#d00000')};
+  font-weight: 700;
 `;
 
 export const TableCellAtivos = styled.View`
+  flex: ${p => p.flex || 1};
   flex-direction: row;
-  justify-content: space-around;
-  flex: ${(props) => props.flex || 1};
-  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 `;
 
 export const IconButton = styled.TouchableOpacity`
-  padding: 5px;
+  padding: 6px;
+  border-radius: 8px;
+  background-color: #e6eef0;
 `;
 
 export const EmptyTableText = styled.Text`
-  font-size: 14px;
-  color: #777;
+  padding: 16px;
   text-align: center;
-  padding: 20px 10px;
+  color: #5a5a5a;
 `;
 
-/* ===== BOTÃO FLUTUANTE ===== */
-export const FabButton = styled.TouchableOpacity.attrs({
-  style: { shadowOffset: { width: 0, height: 2 } },
-})`
+export const FabButton = styled.TouchableOpacity`
   position: absolute;
-  bottom: 80px;
-  right: 20px;
-  background-color: #56949F;
-  width: 110px;
-  height: 45px;
-  border-radius: 25px;
-  align-items: center;
-  justify-content: center;
-  elevation: 5;
+  right: 18px;
+  bottom: 90px;
+  background-color: #78c2cc;
+  padding: 12px 18px;
+  border-radius: 24px;
   shadow-color: #000;
-  shadow-opacity: 0.3;
-  shadow-radius: 4px;
+  shadow-opacity: 0.2;
+  shadow-radius: 6px;
+  elevation: 4;
 `;
 
 export const FabText = styled.Text`
-  color: #FFF;
+  color: #ffffff;
+  font-weight: 700;
   font-size: 16px;
-  font-weight: bold;
 `;
 
-/* ===== BOTTOM NAV ===== */
 export const BottomNav = styled.View`
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  left: 14px;
+  right: 14px;
+  bottom: 16px;
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 10px 14px;
   flex-direction: row;
-  height: 65px;
-  background-color: #F8F8F8;
-  border-top-width: 1px;
-  border-top-color: #DDD;
-  justify-content: space-around;
   align-items: center;
+  justify-content: space-between;
 `;
 
 export const NavButton = styled.TouchableOpacity`
   flex: 1;
   align-items: center;
-  justify-content: center;
-  background-color: ${(props) => (props.active ? '#DDEBEC' : 'transparent')};
-  border-radius: ${(props) => (props.active ? 10 : 0)}px;
-  margin: 5px;
-  height: 45px;
 `;
 
 export const NavText = styled.Text`
-  font-size: 14px;
-  color: ${(props) => (props.active ? '#0D202B' : '#A9A9A9')};
-  font-weight: ${(props) => (props.active ? 'bold' : 'normal')};
+  color: ${p => (p.active ? '#0f2c33' : '#8c9aa0')};
+  font-weight: ${p => (p.active ? '700' : '500')};
 `;
 
-/* ===== BOTÃO CENTRAL DA NAV ===== */
-export const NavCenterButton = styled.TouchableOpacity.attrs({
-  style: { shadowOffset: { width: 0, height: -1 } },
-})`
+export const NavCenterButton = styled.View`
+  background-color: #ffffff;
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
   align-items: center;
   justify-content: center;
-  width: 70px;
-  height: 70px;
-  border-radius: 35px;
-  background-color: #F8F8F8;
-  margin-top: -35px;
-  elevation: 4;
-  shadow-color: #000;
-  shadow-opacity: 0.2;
-  shadow-radius: 3px;
-  border-width: 1px;
-  border-color: #DDD;
+  margin: 0 10px;
 `;
 
-export const NavCenterLogo = styled.Image.attrs({
-  resizeMode: 'contain',
-})`
-  width: 60px;
-  height: 60px;
+export const NavCenterLogo = styled.Image`
+  width: 48px;
+  height: 24px;
+  resize-mode: contain;
 `;
