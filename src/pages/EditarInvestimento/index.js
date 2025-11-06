@@ -9,10 +9,11 @@ import {
   Keyboard,
   LayoutAnimation,
   UIManager,
+  View,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import axios from 'axios';
-import Feather from 'react-native-vector-icons/Feather'; // << trocado
+import Feather from 'react-native-vector-icons/Feather';
 import api from '../../services/api';
 
 import {
@@ -73,7 +74,7 @@ async function fetchBrapiSuggestions(q) {
     const { data } = await axios.get(`${BRAPI_V2_SEARCH}?q=${encodeURIComponent(q)}`);
     const rows = Array.isArray(data?.stocks) ? data.stocks : [];
     rows.forEach((s) =>
-      out.push({ stock: String(s?.stock || '').toUpperCase(), name: s?.name || '', _origin: 'v2/search' })
+      out.push({ stock: String(s?.stock || '').toUpperCase(), name: s?.name || '' })
     );
   } catch {}
 
@@ -82,7 +83,7 @@ async function fetchBrapiSuggestions(q) {
       const { data } = await axios.get(`${BRAPI_LIST}?search=${encodeURIComponent(q)}`);
       const rows = Array.isArray(data?.stocks) ? data.stocks : [];
       rows.forEach((s) =>
-        out.push({ stock: String(s?.stock || '').toUpperCase(), name: s?.name || '', _origin: 'quote/list' })
+        out.push({ stock: String(s?.stock || '').toUpperCase(), name: s?.name || '' })
       );
     } catch {}
   }
@@ -104,13 +105,6 @@ export default function EditarInvestimento() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const avgPrice = useMemo(() => {
-    const q = parseFloat(String(quantidade).replace(',', '.'));
-    const inv = parseFloat(String(valorInvestido).replace(',', '.'));
-    if (!isFinite(q) || q <= 0 || !isFinite(inv) || inv < 0) return 0;
-    return inv / q;
-  }, [quantidade, valorInvestido]);
-
   const [currentPrice, setCurrentPrice] = useState(null);
 
   const [nameSuggestions, setNameSuggestions] = useState([]);
@@ -123,6 +117,13 @@ export default function EditarInvestimento() {
   const [nameDrop, setNameDrop] = useState({ x: 0, y: 0, w: 0 });
   const [tickerDrop, setTickerDrop] = useState({ x: 0, y: 0, w: 0 });
 
+  const avgPrice = useMemo(() => {
+    const q = parseFloat(String(quantidade).replace(',', '.'));
+    const inv = parseFloat(String(valorInvestido).replace(',', '.'));
+    if (!isFinite(q) || q <= 0 || !isFinite(inv) || inv < 0) return 0;
+    return inv / q;
+  }, [quantidade, valorInvestido]);
+
   const measureBelowName = (e) => {
     const { x, y, height, width } = e.nativeEvent.layout;
     setNameDrop({ x, y: y + height + 4, w: width });
@@ -134,6 +135,12 @@ export default function EditarInvestimento() {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
   };
 
+  // Feather (RN CLI)
+  useEffect(() => {
+    Feather.loadFont()?.catch?.(() => {});
+  }, []);
+
+  // Carrega investimento
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -161,6 +168,7 @@ export default function EditarInvestimento() {
     return () => { alive = false; };
   }, [currentId]);
 
+  // Preço atual
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -175,6 +183,7 @@ export default function EditarInvestimento() {
     return () => { alive = false; };
   }, [ticker]);
 
+  // 🔹 LISTAS PARA O AUTOCOMPLETE (faltava isso)
   const nameListWithTyped = useMemo(() => {
     const typed = (nome || '').trim();
     const base = Array.isArray(nameSuggestions) ? nameSuggestions : [];
@@ -191,6 +200,7 @@ export default function EditarInvestimento() {
     return [{ stock: typed, name: nome || '', _origin: 'typed' }, ...withoutDup].slice(0, 8);
   }, [ticker, tickerSuggestions, nome]);
 
+  // Busca sugestões por nome
   useEffect(() => {
     const qRaw = (nome || '').trim();
     if (!qRaw) { setNameSuggestions([]); setShowNameSuggestions(false); return; }
@@ -217,6 +227,7 @@ export default function EditarInvestimento() {
     return () => clearTimeout(t);
   }, [nome]);
 
+  // Busca sugestões por ticker
   useEffect(() => {
     const qRaw = (ticker || '').trim().toUpperCase();
     if (!qRaw) { setTickerSuggestions([]); setShowTickerSuggestions(false); return; }
@@ -245,13 +256,11 @@ export default function EditarInvestimento() {
     if (item.name) setNome(item.name);
     if (item.stock) setTicker(item.stock);
     setShowNameSuggestions(false);
-    Keyboard.dismiss();
   };
   const handleSelectFromTicker = (item) => {
     if (item.stock) setTicker(item.stock);
     if (item.name && !nome) setNome(item.name);
     setShowTickerSuggestions(false);
-    Keyboard.dismiss();
   };
 
   const handleLogout = () => {
@@ -268,15 +277,34 @@ export default function EditarInvestimento() {
       Alert.alert('Erro', 'Por favor, preencha todos os campos.'); return;
     }
 
+    const qty = Number(quantidade);
+    const invested = parseFloat(String(valorInvestido).replace(',', '.'));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      Alert.alert('Atenção', 'Quantidade deve ser um número positivo.');
+      return;
+    }
+    if (!Number.isFinite(invested) || invested <= 0) {
+      Alert.alert('Atenção', 'Valor investido deve ser um número positivo.');
+      return;
+    }
+
+    const okDate = /^\d{4}-\d{2}-\d{2}$/.test(dataInvestimento);
+    if (!okDate) {
+      Alert.alert('Data inválida', 'Use o formato AAAA-MM-DD (ex.: 2025-10-28).');
+      return;
+    }
+    const dateISO = new Date(`${dataInvestimento}T00:00:00Z`).toISOString();
+
     setSaving(true);
     try {
       const payload = {
-        name: nome,
-        ticker: ticker.toUpperCase(),
-        quantity: parseInt(String(quantidade), 10),
-        investedValue: parseFloat(String(valorInvestido).replace(',', '.')),
-        dateInvested: new Date(dataInvestimento),
+        name: nome.trim(),
+        ticker: ticker.trim().toUpperCase(),
+        quantity: qty,
+        investedValue: invested,
+        dateInvested: dateISO, // ou a string YYYY-MM-DD, se o back preferir
       };
+
       try { await api.put(`/investimentos/${currentId}`, payload); }
       catch { await api.patch(`/investimentos/${currentId}`, payload); }
 
@@ -285,7 +313,9 @@ export default function EditarInvestimento() {
     } catch (err) {
       const msg = err?.response?.data?.message || err.message || 'Não foi possível atualizar.';
       Alert.alert('Erro', msg);
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -295,79 +325,86 @@ export default function EditarInvestimento() {
           <LogoImage source={require('../../imgs/Logo-semfundo.png')} />
           <LogoutButton onPress={handleLogout}>
             <LogoutText>Sair</LogoutText>
-            <Feather name="log-out" size={18} color="#56949F" /> {/* << trocado */}
+            <Feather name="log-out" size={18} color="#56949F" />
           </LogoutButton>
         </Header>
 
         <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 150 }} keyboardShouldPersistTaps="handled">
           <ContentContainer behavior={Platform.OS === 'ios' ? 'padding' : undefined} enabled>
+
             <BackButton onPress={handleGoBack}>
-              <Feather name="arrow-left" size={20} color="#E6E6E6" /> {/* << trocado */}
+              <Feather name="arrow-left" size={20} color="#E6E6E6" />
               <BackButtonText>voltar</BackButtonText>
             </BackButton>
 
             <Title>{loading ? 'Carregando…' : 'Editar investimento'}</Title>
 
-            <Label>Nome do investimento</Label>
-            <Input
-              placeholder="Ex: Petrobras, Magazine Luiza"
-              placeholderTextColor="#A9A9A9"
-              value={nome}
-              onChangeText={(t) => { setNome(t); setShowNameSuggestions(t.trim().length > 0); }}
-              onFocus={() => setShowNameSuggestions((nome || '').trim().length > 0)}
-              onLayout={measureBelowName}
-              editable={!loading}
-            />
-            {showNameSuggestions && (
-              <SuggestionContainer style={{ top: nameDrop.y, left: nameDrop.x, width: nameDrop.w }}>
-                <ScrollView keyboardShouldPersistTaps="handled">
-                  {nameListWithTyped.map((item, idx) => (
-                    <SuggestionItem key={`${item.name}-${item.stock}-${idx}`} onPress={() => handleSelectFromName(item)}>
-                      <SuggestionText>
-                        {item.name}{item.stock ? ` — ${item.stock}` : ''}{item._origin === 'typed' ? '  (usar este)' : ''}
-                      </SuggestionText>
-                    </SuggestionItem>
-                  ))}
-                  {nameFetching && (
-                    <SuggestionItem activeOpacity={1}>
-                      <SuggestionText>Buscando sugestões…</SuggestionText>
-                    </SuggestionItem>
-                  )}
-                </ScrollView>
-              </SuggestionContainer>
-            )}
+            {/* Nome + autocomplete */}
+            <View style={{ position: 'relative' }}>
+              <Label>Nome do investimento</Label>
+              <Input
+                placeholder="Ex: Petrobras, Magazine Luiza"
+                placeholderTextColor="#A9A9A9"
+                value={nome}
+                onChangeText={(t) => { setNome(t); setShowNameSuggestions(t.trim().length > 0); }}
+                onFocus={() => setShowNameSuggestions((nome || '').trim().length > 0)}
+                onLayout={measureBelowName}
+                editable={!loading}
+              />
+              {showNameSuggestions && (
+                <SuggestionContainer style={{ top: nameDrop.y, left: nameDrop.x, width: nameDrop.w }}>
+                  <ScrollView keyboardShouldPersistTaps="handled">
+                    {nameListWithTyped.map((item, idx) => (
+                      <SuggestionItem key={`${item.name}-${item.stock}-${idx}`} onPress={() => handleSelectFromName(item)}>
+                        <SuggestionText>
+                          {item.name}{item.stock ? ` — ${item.stock}` : ''}
+                        </SuggestionText>
+                      </SuggestionItem>
+                    ))}
+                    {nameFetching && (
+                      <SuggestionItem activeOpacity={1}>
+                        <SuggestionText>Buscando sugestões…</SuggestionText>
+                      </SuggestionItem>
+                    )}
+                  </ScrollView>
+                </SuggestionContainer>
+              )}
+            </View>
 
-            <Label>Ticker</Label>
-            <Input
-              placeholder="Ex: PETR4, MGLU3"
-              placeholderTextColor="#A9A9A9"
-              autoCapitalize="characters"
-              autoCorrect={false}
-              value={ticker}
-              onChangeText={(t) => { setTicker(t.toUpperCase()); setShowTickerSuggestions(t.trim().length > 0); }}
-              onFocus={() => setShowTickerSuggestions((ticker || '').trim().length > 0)}
-              onLayout={measureBelowTicker}
-              onSubmitEditing={() => setShowTickerSuggestions(false)}
-              editable={!loading}
-            />
-            {showTickerSuggestions && (
-              <SuggestionContainer style={{ top: tickerDrop.y, left: tickerDrop.x, width: tickerDrop.w }}>
-                <ScrollView keyboardShouldPersistTaps="handled">
-                  {tickerListWithTyped.map((item, idx) => (
-                    <SuggestionItem key={`${item.stock}-${idx}`} onPress={() => handleSelectFromTicker(item)}>
-                      <SuggestionText>
-                        {item.stock}{item.name ? ` - ${item.name}` : ''}{item._origin === 'typed' ? '  (usar este)' : ''}
-                      </SuggestionText>
-                    </SuggestionItem>
-                  ))}
-                  {tickerFetching && (
-                    <SuggestionItem activeOpacity={1}>
-                      <SuggestionText>Buscando sugestões…</SuggestionText>
-                    </SuggestionItem>
-                  )}
-                </ScrollView>
-              </SuggestionContainer>
-            )}
+            {/* Ticker + autocomplete */}
+            <View style={{ position: 'relative' }}>
+              <Label>Ticker</Label>
+              <Input
+                placeholder="Ex: PETR4, MGLU3"
+                placeholderTextColor="#A9A9A9"
+                autoCapitalize="characters"
+                autoCorrect={false}
+                value={ticker}
+                onChangeText={(t) => { const v = (t || '').toUpperCase(); setTicker(v); setShowTickerSuggestions(v.trim().length > 0); }}
+                onFocus={() => setShowTickerSuggestions((ticker || '').trim().length > 0)}
+                onLayout={measureBelowTicker}
+                onSubmitEditing={() => setShowTickerSuggestions(false)}
+                editable={!loading}
+              />
+              {showTickerSuggestions && (
+                <SuggestionContainer style={{ top: tickerDrop.y, left: tickerDrop.x, width: tickerDrop.w }}>
+                  <ScrollView keyboardShouldPersistTaps="handled">
+                    {tickerListWithTyped.map((item, idx) => (
+                      <SuggestionItem key={`${item.stock}-${idx}`} onPress={() => handleSelectFromTicker(item)}>
+                        <SuggestionText>
+                          {item.stock}{item.name ? ` - ${item.name}` : ''}
+                        </SuggestionText>
+                      </SuggestionItem>
+                    ))}
+                    {tickerFetching && (
+                      <SuggestionItem activeOpacity={1}>
+                        <SuggestionText>Buscando sugestões…</SuggestionText>
+                      </SuggestionItem>
+                    )}
+                  </ScrollView>
+                </SuggestionContainer>
+              )}
+            </View>
 
             <Label>Quantidade</Label>
             <Input
@@ -407,10 +444,12 @@ export default function EditarInvestimento() {
               <CurrentValueText>Preço atual (BRAPI): R$ {Number(currentPrice).toFixed(2)}</CurrentValueText>
             )}
 
-            <SubmitButton onPress={handleSalvar} disabled={saving || loading} activeOpacity={0.85}>
-              {saving ? <ActivityIndicator color="#FFF" /> : (
+            <SubmitButton onPress={handleSalvar} disabled={saving || loading}>
+              {saving ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
                 <>
-                  <Feather name="save" size={18} color="#FFF" /> {/* << trocado */}
+                  <Feather name="save" size={18} color="#FFF" />
                   <SubmitText style={{ marginLeft: 8 }}>Salvar</SubmitText>
                 </>
               )}

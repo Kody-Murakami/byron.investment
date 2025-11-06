@@ -2,8 +2,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Platform, ScrollView, Alert, RefreshControl } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import Feather from 'react-native-vector-icons/Feather'; // << mesmo método do Add
-import axios from 'axios/dist/browser/axios.cjs';
+import Feather from 'react-native-vector-icons/Feather';
+import axios from 'axios';
 import api from '../../services/api';
 
 import {
@@ -35,18 +35,16 @@ import {
   NavCenterLogo,
 } from './styles';
 
-// Se tiver token da BRAPI, coloque aqui (opcional)
+// (opcional) token da BRAPI
 const BRAPI_TOKEN = '';
 const withToken = (url) =>
   BRAPI_TOKEN ? `${url}${url.includes('?') ? '&' : '?'}token=${BRAPI_TOKEN}` : url;
 
-const BRAPI_LIST_URL = withToken('https://brapi.dev/api/quote/list');
-const BRAPI_QUOTE_URL = 'https://brapi.dev/api/quote'; // aceita múltiplos separados por vírgula
+const BRAPI_QUOTE_URL = 'https://brapi.dev/api/quote';
 
 export default function Home() {
   const navigation = useNavigation();
 
-  // garante que a fonte foi carregada (alguns setups de RN bare precisam disso)
   useEffect(() => {
     Feather.loadFont()?.catch?.(() => {});
   }, []);
@@ -66,42 +64,214 @@ export default function Home() {
   const handleNavigateNovo = () => navigation.navigate('NovoInvestimento');
 
   const handleEdit = (item) => {
-    const id = item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId;
+    const id =
+      item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId ?? item?.Id ?? null;
     if (!id) return Alert.alert('Erro', 'ID do investimento não encontrado.');
     navigation.navigate('EditarInvestimento', { investmentId: id });
   };
 
+  // === EXCLUIR: tenta rota REST e fallback por query ===
   const handleDelete = (item) => {
-    const id = item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId;
-    if (!id) return Alert.alert('Erro', 'ID do investimento não encontrado.');
-    Alert.alert('Confirmar', 'Deseja remover este investimento?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Remover',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.delete(`/investimentos/${id}`);
+  // pega o id exatamente como vier, mas força string
+  const rawId =
+    item?.id ??
+    item?._id ??
+    item?.investmentId ??
+    item?.investimentoId ??
+    null;
+
+  const id = rawId != null ? String(rawId) : null;
+
+  if (!id) {
+    return Alert.alert('Erro', 'ID do investimento não encontrado.');
+  }
+
+  Alert.alert('Confirmar', 'Deseja remover este investimento?', [
+    { text: 'Cancelar', style: 'cancel' },
+    {
+      text: 'Remover',
+      style: 'destructive',
+      onPress: async () => {
+        const url = `/investimentos/${encodeURIComponent(id)}`;
+
+        // --- Otimistic UI: tira da tela antes (e volta se falhar)
+        const prev = carteira;
+        setCarteira((list) => list.filter((x) => String(
+          x?.id ?? x?._id ?? x?.investmentId ?? x?.investimentoId
+        ) !== id));
+
+        try {
+          // Aceita qualquer status como “resposta” para não cair em exception
+          const resp = await api.delete(url, {
+            timeout: 15000,
+            validateStatus: () => true,
+            headers: { Accept: 'application/json' },
+          });
+
+          // Muitos backends devolvem 204 (sem body) no delete
+          const ok = resp?.status === 200 || resp?.status === 202 || resp?.status === 204;
+
+          if (ok) {
+            // Mensagem amigável mesmo que não tenha body
+            const msg = resp?.data?.message || 'Investimento removido com sucesso!';
+            Alert.alert('Sucesso', msg);
+            // Recarrega do back para garantir consistência
             await carregarDados();
-          } catch (err) {
-            const msg = err.response?.data?.message || err.response?.data?.error || 'Não foi possível remover.';
-            Alert.alert('Erro', msg);
+            return;
           }
-        },
+
+          // Se chegou aqui, servidor respondeu mas não “ok”
+          const msg =
+            resp?.data?.message ||
+            resp?.data?.error ||
+            `Falha ao remover (status ${resp?.status ?? '???'})`;
+          // rollback da UI otimista
+          setCarteira(prev);
+          Alert.alert('Erro', msg);
+        } catch (err) {
+          // Erro de rede/timeout/etc. -> rollback e alerta
+          setCarteira(prev);
+          const human =
+            err?.message?.includes('timeout')
+              ? 'Tempo de espera excedido ao contatar o servidor.'
+              : err?.message || 'Erro ao remover investimento.';
+          Alert.alert('Erro', human);
+        }
       },
-    ]);
+    },
+  ]);
+};
+
+  // ---- utils
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   };
+  const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+  // === COTAÇÕES ROBUSTAS: batch + .SA + lookup + histórico ===
+const fetchQuotes = async (tickers) => {
+  if (!Array.isArray(tickers) || tickers.length === 0) return {};
+
+  const norm = (t) => String(t || '').toUpperCase().trim();
+  const base = Array.from(new Set(tickers.map(norm).filter(Boolean)));
+  const withSa = base.map(t => (t.includes('.') ? t : `${t}.SA`));
+  const all = Array.from(new Set([...base, ...withSa]));
+
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const chunk = (arr, n = 45) => {
+    const out = [];
+    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+    return out;
+  };
+
+  // helper: extrai preço de um objeto da BRAPI
+  const extractPrice = (r) => {
+    const direct =
+      toNum(r?.regularMarketPrice) ??
+      toNum(r?.close) ??
+      toNum(r?.price) ??
+      toNum(r?.regularMarketPreviousClose);
+
+    if (direct != null) return direct;
+
+    // fallback: último close válido do histórico
+    const hist = Array.isArray(r?.historicalDataPrice) ? r.historicalDataPrice : [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const p = toNum(hist[i]?.close);
+      if (p != null) return p;
+    }
+    return null;
+  };
+
+  const map = {};
+
+  // 1) batch inicial (rápido)
+  for (const group of chunk(all)) {
+    const url = withToken(
+      `${BRAPI_QUOTE_URL}/${group.map(encodeURIComponent).join(',')}?range=1d&interval=1d`
+    );
+    try {
+      const { data } = await axios.get(url);
+      const results = Array.isArray(data?.results) ? data.results : [];
+      for (const r of results) {
+        const symRaw = String(r.symbol || r.stock || '').toUpperCase();
+        const sym = symRaw.replace('.SA', '');
+        const price = extractPrice(r);
+        if (sym && price != null && map[sym] == null) map[sym] = price;
+      }
+    } catch {}
+  }
+
+  // 2) quem faltou: range maior + lookup por search
+  const missing = base.filter(t => map[t] == null);
+
+  for (const t of missing) {
+    const tries = [t, t.includes('.') ? t : `${t}.SA`];
+
+    let got = false;
+    // 2a) tenta direto com range maior (traz histórico)
+    for (const sym of tries) {
+      try {
+        const urlOne = withToken(
+          `${BRAPI_QUOTE_URL}/${encodeURIComponent(sym)}?range=1mo&interval=1d`
+        );
+        const { data } = await axios.get(urlOne);
+        const r = Array.isArray(data?.results) ? data.results[0] : null;
+        const price = r ? extractPrice(r) : null;
+        if (price != null) {
+          map[t] = price;
+          got = true;
+          break;
+        }
+      } catch {}
+    }
+    if (got) { await new Promise(res => setTimeout(res, 120)); continue; }
+
+    // 2b) descobre símbolo exato via search
+    try {
+      const sUrl = withToken(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(t)}`);
+      const { data: sdata } = await axios.get(sUrl);
+      const rows = Array.isArray(sdata?.stocks) ? sdata.stocks : [];
+      const hit = rows.find(x => x?.stock) || null;
+      if (hit) {
+        const stock = String(hit.stock).toUpperCase();
+        const urlExact = withToken(
+          `${BRAPI_QUOTE_URL}/${encodeURIComponent(stock)}?range=1mo&interval=1d`
+        );
+        const { data: qdata } = await axios.get(urlExact);
+        const r = Array.isArray(qdata?.results) ? qdata.results[0] : null;
+        const price = r ? extractPrice(r) : null;
+        if (price != null) {
+          const key = stock.replace('.SA', '');
+          map[key] = price;
+          if (map[t] == null) map[t] = price;
+        }
+      }
+    } catch {}
+
+    await new Promise(res => setTimeout(res, 120)); // evita rate limit
+  }
+
+  return map;
+};
 
   const carregarDados = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/investimentos');
 
+      // 1) back-end
+      const res = await api.get('/investimentos');
       const lista = Array.isArray(res.data?.investimentos)
         ? res.data.investimentos
-        : (Array.isArray(res.data) ? res.data : []);
+        : Array.isArray(res.data)
+        ? res.data
+        : [];
 
-      const base = (lista || []).map(it => ({
+      const base = (lista || []).map((it) => ({
         id: it.id ?? it._id ?? it.investmentId ?? it?.investimentoId,
         name: it.name || it.descricao || '',
         ticker: String(it.ticker || '').toUpperCase(),
@@ -109,89 +279,45 @@ export default function Home() {
         investedValue: Number(it.investedValue) || 0,
       }));
 
-      // === BRAPI em batch, com .SA e fallback ===
-      const tickers = Array.from(new Set(base.map(x => x.ticker).filter(Boolean)));
-      let quoteMap = {};
+      // 2) cotações
+      const tickers = Array.from(new Set(base.map((x) => x.ticker).filter(Boolean)));
+      const mapPrices = await fetchQuotes(tickers);
 
-      if (tickers.length) {
-        const makeUrl = (syms) =>
-          withToken(`${BRAPI_QUOTE_URL}/${syms.map(encodeURIComponent).join(',')}?range=1d&interval=1d`);
-
-        try {
-          // 1) batch direto
-          let { data } = await axios.get(makeUrl(tickers));
-          let results = Array.isArray(data?.results) ? data.results : [];
-
-          // 2) tenta com .SA se vazio
-          if (!results.length) {
-            const withSa = tickers.map(t => (t.endsWith('.SA') ? t : `${t}.SA`));
-            const respSa = await axios.get(makeUrl(withSa));
-            results = Array.isArray(respSa?.data?.results) ? respSa.data.results : [];
-          }
-
-          // 3) fallback 1-a-1
-          if (!results.length) {
-            for (const t of tickers) {
-              try {
-                const r1 = await axios.get(withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(t)}?range=1d&interval=1d`));
-                if (Array.isArray(r1?.data?.results) && r1.data.results[0]) {
-                  results.push(r1.data.results[0]);
-                  continue;
-                }
-                const tSA = t.endsWith('.SA') ? t : `${t}.SA`;
-                const r2 = await axios.get(withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(tSA)}?range=1d&interval=1d`));
-                if (Array.isArray(r2?.data?.results) && r2.data.results[0]) {
-                  results.push(r2.data.results[0]);
-                }
-              } catch {}
-            }
-          }
-
-          // monta o mapa tolerante
-          results.forEach(r => {
-            const symRaw = String(r.symbol || r.stock || '').toUpperCase();
-            const sym = symRaw.replace('.SA', '');
-
-            const price =
-              toNum(r.regularMarketPrice) ??
-              toNum(r.close) ??
-              toNum(r.regularMarketPreviousClose) ??
-              null;
-
-            let pct = toNum(r.regularMarketChangePercent) ?? null;
-            if (pct == null && isFiniteNum(price) && isFiniteNum(r.regularMarketPreviousClose)) {
-              const prev = Number(r.regularMarketPreviousClose);
-              if (prev) pct = ((price / prev) - 1) * 100;
-            }
-            if (pct == null && isFiniteNum(r.change)) {
-              pct = Number(r.change);
-            }
-
-            if (sym) {
-              quoteMap[sym] = {
-                currentPrice: isFiniteNum(price) ? price : null,
-                changePercent: isFiniteNum(pct) ? pct : null,
-              };
-            }
-          });
-
-        } catch (e) {
-          quoteMap = {};
-        }
-      }
-
-      const withPrices = base.map(it => {
+      // 3) calcula preço médio e valorização vs. médio
+      const withPrices = base.map((it) => {
         const avg = it.quantity > 0 ? it.investedValue / it.quantity : 0;
-        const q = quoteMap[it.ticker] || {};
+        const cur = mapPrices[it.ticker] ?? null;
+        const pctVsAvg = cur != null && avg > 0 ? ((cur - avg) / avg) * 100 : null;
+
         return {
           ...it,
           avgPrice: avg,
-          currentPrice: isFiniteNum(q.currentPrice) ? q.currentPrice : null,
-          changePercent: isFiniteNum(q.changePercent) ? q.changePercent : null,
+          currentPrice: cur,
+          pctVsAvg,
         };
       });
 
       setCarteira(withPrices);
+
+      // Destaques do dia (opcional)
+      try {
+        setLoadingHighlights(true);
+        const { data } = await axios.get(withToken('https://brapi.dev/api/quote/list'));
+        const rows = Array.isArray(data?.stocks) ? data.stocks : [];
+        const hi = rows
+          .map((s) => ({
+            ticker: s?.stock || s?.symbol || '',
+            changePercent: toNum(s?.regularMarketChangePercent) ?? toNum(s?.change),
+          }))
+          .filter((x) => x.ticker && x.changePercent != null)
+          .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
+          .slice(0, 5);
+        setHighlights(hi);
+      } catch {
+        setHighlights([]);
+      } finally {
+        setLoadingHighlights(false);
+      }
     } catch (err) {
       if (err.response?.status === 401) {
         Alert.alert('Sessão expirada', 'Faça login novamente.');
@@ -207,34 +333,6 @@ export default function Home() {
   };
 
   useFocusEffect(useCallback(() => { carregarDados(); }, []));
-
-  useEffect(() => {
-    const fetchHighlights = async () => {
-      try {
-        setLoadingHighlights(true);
-        const { data } = await axios.get(BRAPI_LIST_URL);
-        const rows = Array.isArray(data?.stocks) ? data.stocks : [];
-        const list = rows
-          .map(s => ({
-            ticker: s?.stock || s?.symbol || '',
-            changePercent:
-              isFiniteNum(s?.regularMarketChangePercent)
-                ? Number(s.regularMarketChangePercent)
-                : (isFiniteNum(s?.change) ? Number(s.change) : null),
-          }))
-          .filter(x => x.ticker && x.changePercent !== null)
-          .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
-          .slice(0, 5);
-        setHighlights(list);
-      } catch {
-        setHighlights([]);
-      } finally {
-        setLoadingHighlights(false);
-      }
-    };
-    fetchHighlights();
-  }, []);
-
   const onRefresh = () => {
     setRefreshing(true);
     carregarDados();
@@ -276,17 +374,20 @@ export default function Home() {
               ) : carteira.length === 0 ? (
                 <EmptyTableText>Sem ativos na carteira.</EmptyTableText>
               ) : (
-                carteira.map(item => {
+                carteira.map((item) => {
                   const avg = Number(item.avgPrice) || 0;
-                  const cur = isFiniteNum(item.currentPrice) ? Number(item.currentPrice) : null;
-                  const chg = isFiniteNum(item.changePercent) ? Number(item.changePercent) : null;
-                  const chgStr = chg != null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%` : '--';
+                  const cur = item.currentPrice != null ? Number(item.currentPrice) : null;
+                  const pct = item.pctVsAvg;
+                  const pctStr = pct == null ? '--' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+
                   return (
                     <TableRow key={item.id || item.ticker}>
                       <TableCell flex={1}>{item.ticker}</TableCell>
                       <TableCell flex={1.2}>R$ {avg.toFixed(2)}</TableCell>
                       <TableCell flex={1.2}>{cur != null ? `R$ ${cur.toFixed(2)}` : '--'}</TableCell>
-                      <TableCellValorizacao flex={1.2} positive={(chg ?? 0) >= 0}>{chgStr}</TableCellValorizacao>
+                      <TableCellValorizacao flex={1.2} positive={(pct ?? 0) >= 0}>
+                        {pctStr}
+                      </TableCellValorizacao>
                       <TableCellAtivos flex={0.9}>
                         <IconButton onPress={() => handleEdit(item)}>
                           <Feather name="edit" size={18} color="#56949F" />
@@ -302,7 +403,7 @@ export default function Home() {
             </Table>
           </Card>
 
-          {/* DESTAQUE DO DIA */}
+          {/* DESTAQUE DO DIA (opcional) */}
           <Card>
             <CardTitle>Destaque do dia:</CardTitle>
             <Table>
@@ -316,13 +417,15 @@ export default function Home() {
               ) : highlights.length === 0 ? (
                 <EmptyTableText>Nenhum destaque hoje.</EmptyTableText>
               ) : (
-                highlights.map(h => {
+                highlights.map((h) => {
                   const positive = h.changePercent >= 0;
                   const formatted = `${positive ? '+' : ''}${h.changePercent.toFixed(2)}%`;
                   return (
                     <TableRow key={h.ticker}>
                       <TableCell flex={1}>{h.ticker}</TableCell>
-                      <TableCellValorizacao flex={1} positive={positive}>{formatted}</TableCellValorizacao>
+                      <TableCellValorizacao flex={1} positive={positive}>
+                        {formatted}
+                      </TableCellValorizacao>
                     </TableRow>
                   );
                 })
@@ -349,13 +452,4 @@ export default function Home() {
       </BottomNav>
     </Background>
   );
-}
-
-// helpers
-function toNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function isFiniteNum(v) {
-  return typeof v === 'number' && Number.isFinite(v);
 }
