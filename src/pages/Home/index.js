@@ -1,4 +1,3 @@
-// src/pages/Home/index.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { Platform, ScrollView, Alert, RefreshControl } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -72,218 +71,196 @@ export default function Home() {
 
   // === EXCLUIR: tenta rota REST e fallback por query ===
   const handleDelete = (item) => {
-  // pega o id exatamente como vier, mas força string
-  const rawId =
-    item?.id ??
-    item?._id ??
-    item?.investmentId ??
-    item?.investimentoId ??
-    null;
+    const rawId =
+      item?.id ??
+      item?._id ??
+      item?.investmentId ??
+      item?.investimentoId ??
+      null;
 
-  const id = rawId != null ? String(rawId) : null;
+    const id = rawId != null ? String(rawId) : null;
 
-  if (!id) {
-    return Alert.alert('Erro', 'ID do investimento não encontrado.');
-  }
+    if (!id) {
+      return Alert.alert('Erro', 'ID do investimento não encontrado.');
+    }
 
-  Alert.alert('Confirmar', 'Deseja remover este investimento?', [
-    { text: 'Cancelar', style: 'cancel' },
-    {
-      text: 'Remover',
-      style: 'destructive',
-      onPress: async () => {
-        const url = `/investimentos/${encodeURIComponent(id)}`;
+    Alert.alert('Confirmar', 'Deseja remover este investimento?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Remover',
+        style: 'destructive',
+        onPress: async () => {
+          const url = `/investimentos/${encodeURIComponent(id)}`;
 
-        // --- Otimistic UI: tira da tela antes (e volta se falhar)
-        const prev = carteira;
-        setCarteira((list) => list.filter((x) => String(
-          x?.id ?? x?._id ?? x?.investmentId ?? x?.investimentoId
-        ) !== id));
+          // Otimista: remove da UI e volta se falhar
+          const prev = carteira;
+          setCarteira((list) =>
+            list.filter((x) =>
+              String(x?.id ?? x?._id ?? x?.investmentId ?? x?.investimentoId) !== id
+            )
+          );
 
-        try {
-          // Aceita qualquer status como “resposta” para não cair em exception
-          const resp = await api.delete(url, {
-            timeout: 15000,
-            validateStatus: () => true,
-            headers: { Accept: 'application/json' },
-          });
+          try {
+            const resp = await api.delete(url, {
+              timeout: 15000,
+              validateStatus: () => true,
+              headers: { Accept: 'application/json' },
+            });
 
-          // Muitos backends devolvem 204 (sem body) no delete
-          const ok = resp?.status === 200 || resp?.status === 202 || resp?.status === 204;
+            const ok = resp?.status === 200 || resp?.status === 202 || resp?.status === 204;
 
-          if (ok) {
-            // Mensagem amigável mesmo que não tenha body
-            const msg = resp?.data?.message || 'Investimento removido com sucesso!';
-            Alert.alert('Sucesso', msg);
-            // Recarrega do back para garantir consistência
-            await carregarDados();
-            return;
+            if (ok) {
+              const msg = resp?.data?.message || 'Investimento removido com sucesso!';
+              Alert.alert('Sucesso', msg);
+              await carregarDados();
+              return;
+            }
+
+            const msg =
+              resp?.data?.message ||
+              resp?.data?.error ||
+              `Falha ao remover (status ${resp?.status ?? '???'})`;
+            setCarteira(prev);
+            Alert.alert('Erro', msg);
+          } catch (err) {
+            setCarteira(prev);
+            const human =
+              err?.message?.includes('timeout')
+                ? 'Tempo de espera excedido ao contatar o servidor.'
+                : err?.message || 'Erro ao remover investimento.';
+            Alert.alert('Erro', human);
           }
-
-          // Se chegou aqui, servidor respondeu mas não “ok”
-          const msg =
-            resp?.data?.message ||
-            resp?.data?.error ||
-            `Falha ao remover (status ${resp?.status ?? '???'})`;
-          // rollback da UI otimista
-          setCarteira(prev);
-          Alert.alert('Erro', msg);
-        } catch (err) {
-          // Erro de rede/timeout/etc. -> rollback e alerta
-          setCarteira(prev);
-          const human =
-            err?.message?.includes('timeout')
-              ? 'Tempo de espera excedido ao contatar o servidor.'
-              : err?.message || 'Erro ao remover investimento.';
-          Alert.alert('Erro', human);
-        }
+        },
       },
-    },
-  ]);
-};
+    ]);
+  };
 
-  // ---- utils
+  // ---- utils numéricos
   const toNum = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
-  const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+  // ---- normalização e validação de tickers ----
+  // Remove sufixo de fracionário: PETR4F -> PETR4
+  const normalizeTicker = (t) => {
+    const s = String(t || '').toUpperCase().trim();
+    return /^[A-Z]{4}\dF$/.test(s) ? s.slice(0, -1) : s;
+  };
+
+  // Usa a BRAPI para tentar encontrar o símbolo correto e substituir
+  const ensureValidTicker = async (t) => {
+    const q = normalizeTicker(t);
+    try {
+      const { data } = await axios.get(
+        withToken(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(q)}`)
+      );
+      const rows = Array.isArray(data?.stocks) ? data.stocks : [];
+      const hit = rows.find((x) => x?.stock) || null;
+      if (hit) {
+        return String(hit.stock).toUpperCase().replace('.SA', '');
+      }
+    } catch {}
+    return q; // se nada achou, mantém (pode resultar em "--" depois)
+  };
 
   // === COTAÇÕES ROBUSTAS: batch + .SA + lookup + histórico ===
+  // === COTAÇÕES: força .SA, depois sem .SA, e por fim resolve via search ===
 const fetchQuotes = async (tickers) => {
   if (!Array.isArray(tickers) || tickers.length === 0) return {};
 
-  const norm = (t) => String(t || '').toUpperCase().trim();
-  const base = Array.from(new Set(tickers.map(norm).filter(Boolean)));
-  const withSa = base.map(t => (t.includes('.') ? t : `${t}.SA`));
-  const all = Array.from(new Set([...base, ...withSa]));
+  const uniq = Array.from(new Set(
+    tickers.map(t => String(t || '').toUpperCase().trim()).filter(Boolean)
+  ));
 
-  const toNum = (v) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  const chunk = (arr, n = 45) => {
-    const out = [];
-    for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
-    return out;
-  };
-
-  // helper: extrai preço de um objeto da BRAPI
-  const extractPrice = (r) => {
+  const getPriceFromResult = (r) => {
+    const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
     const direct =
-      toNum(r?.regularMarketPrice) ??
-      toNum(r?.close) ??
-      toNum(r?.price) ??
-      toNum(r?.regularMarketPreviousClose);
-
+      n(r?.regularMarketPrice) ??
+      n(r?.close) ??
+      n(r?.price) ??
+      n(r?.regularMarketPreviousClose);
     if (direct != null) return direct;
 
-    // fallback: último close válido do histórico
     const hist = Array.isArray(r?.historicalDataPrice) ? r.historicalDataPrice : [];
     for (let i = hist.length - 1; i >= 0; i--) {
-      const p = toNum(hist[i]?.close);
+      const p = n(hist[i]?.close);
       if (p != null) return p;
     }
     return null;
   };
 
-  const map = {};
-
-  // 1) batch inicial (rápido)
-  for (const group of chunk(all)) {
-    const url = withToken(
-      `${BRAPI_QUOTE_URL}/${group.map(encodeURIComponent).join(',')}?range=1d&interval=1d`
-    );
-    try {
-      const { data } = await axios.get(url);
-      const results = Array.isArray(data?.results) ? data.results : [];
-      for (const r of results) {
-        const symRaw = String(r.symbol || r.stock || '').toUpperCase();
-        const sym = symRaw.replace('.SA', '');
-        const price = extractPrice(r);
-        if (sym && price != null && map[sym] == null) map[sym] = price;
-      }
-    } catch {}
-  }
-
-  // 2) quem faltou: range maior + lookup por search
-  const missing = base.filter(t => map[t] == null);
-
-  for (const t of missing) {
-    const tries = [t, t.includes('.') ? t : `${t}.SA`];
-
-    let got = false;
-    // 2a) tenta direto com range maior (traz histórico)
-    for (const sym of tries) {
+  const getOne = async (sym) => {
+    // tenta com .SA primeiro, depois sem .SA
+    const tries = [sym.includes('.') ? sym : `${sym}.SA`, sym];
+    for (const trySym of tries) {
       try {
-        const urlOne = withToken(
-          `${BRAPI_QUOTE_URL}/${encodeURIComponent(sym)}?range=1mo&interval=1d`
-        );
-        const { data } = await axios.get(urlOne);
+        const url = withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(trySym)}?range=1mo&interval=1d`);
+        const { data } = await axios.get(url);
         const r = Array.isArray(data?.results) ? data.results[0] : null;
-        const price = r ? extractPrice(r) : null;
-        if (price != null) {
-          map[t] = price;
-          got = true;
-          break;
-        }
+        const p = r ? getPriceFromResult(r) : null;
+        if (p != null) return { price: p, symbolUsed: trySym };
       } catch {}
     }
-    if (got) { await new Promise(res => setTimeout(res, 120)); continue; }
 
-    // 2b) descobre símbolo exato via search
     try {
-      const sUrl = withToken(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(t)}`);
+      const sUrl = withToken(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(sym)}`);
       const { data: sdata } = await axios.get(sUrl);
       const rows = Array.isArray(sdata?.stocks) ? sdata.stocks : [];
       const hit = rows.find(x => x?.stock) || null;
       if (hit) {
-        const stock = String(hit.stock).toUpperCase();
-        const urlExact = withToken(
-          `${BRAPI_QUOTE_URL}/${encodeURIComponent(stock)}?range=1mo&interval=1d`
-        );
-        const { data: qdata } = await axios.get(urlExact);
-        const r = Array.isArray(qdata?.results) ? qdata.results[0] : null;
-        const price = r ? extractPrice(r) : null;
-        if (price != null) {
-          const key = stock.replace('.SA', '');
-          map[key] = price;
-          if (map[t] == null) map[t] = price;
-        }
+        const found = String(hit.stock).toUpperCase();
+        const url2 = withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(found)}?range=1mo&interval=1d`);
+        const { data: d2 } = await axios.get(url2);
+        const r2 = Array.isArray(d2?.results) ? d2.results[0] : null;
+        const p2 = r2 ? getPriceFromResult(r2) : null;
+        if (p2 != null) return { price: p2, symbolUsed: found };
       }
     } catch {}
 
-    await new Promise(res => setTimeout(res, 120)); // evita rate limit
-  }
+    return { price: null, symbolUsed: null }; 
+  };
 
-  return map;
+  const out = {};
+  for (const t of uniq) {
+    const { price, symbolUsed } = await getOne(t);
+    if (price != null) {
+      // normaliza a chave sem .SA
+      const key = String(symbolUsed || t).toUpperCase().replace('.SA', '');
+      out[key] = price;
+    }
+    // evita rate limit
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  return out;
 };
 
   const carregarDados = async () => {
     try {
       setLoading(true);
-
-      // 1) back-end
       const res = await api.get('/investimentos');
       const lista = Array.isArray(res.data?.investimentos)
         ? res.data.investimentos
         : Array.isArray(res.data)
         ? res.data
         : [];
-
-      const base = (lista || []).map((it) => ({
+      const rawBase = (lista || []).map((it) => ({
         id: it.id ?? it._id ?? it.investmentId ?? it?.investimentoId,
         name: it.name || it.descricao || '',
-        ticker: String(it.ticker || '').toUpperCase(),
+        ticker: normalizeTicker(it.ticker),
         quantity: Number(it.quantity) || 0,
         investedValue: Number(it.investedValue) || 0,
       }));
 
-      // 2) cotações
+      const base = await Promise.all(
+        rawBase.map(async (it) => ({ ...it, ticker: await ensureValidTicker(it.ticker) }))
+      );
+
+      // 3) cotações
       const tickers = Array.from(new Set(base.map((x) => x.ticker).filter(Boolean)));
       const mapPrices = await fetchQuotes(tickers);
 
-      // 3) calcula preço médio e valorização vs. médio
+      // 4) calcula preço médio e valorização vs. médio
       const withPrices = base.map((it) => {
         const avg = it.quantity > 0 ? it.investedValue / it.quantity : 0;
         const cur = mapPrices[it.ticker] ?? null;
@@ -299,7 +276,7 @@ const fetchQuotes = async (tickers) => {
 
       setCarteira(withPrices);
 
-      // Destaques do dia (opcional)
+      // Destaques do dia 
       try {
         setLoadingHighlights(true);
         const { data } = await axios.get(withToken('https://brapi.dev/api/quote/list'));
@@ -402,8 +379,7 @@ const fetchQuotes = async (tickers) => {
               )}
             </Table>
           </Card>
-
-          {/* DESTAQUE DO DIA (opcional) */}
+          
           <Card>
             <CardTitle>Destaque do dia:</CardTitle>
             <Table>
