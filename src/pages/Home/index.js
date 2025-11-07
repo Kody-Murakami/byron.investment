@@ -63,11 +63,11 @@ export default function Home() {
   const handleNavigateNovo = () => navigation.navigate('NovoInvestimento');
 
   const handleEdit = (item) => {
-    const id =
-      item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId ?? item?.Id ?? null;
-    if (!id) return Alert.alert('Erro', 'ID do investimento não encontrado.');
-    navigation.navigate('EditarInvestimento', { investmentId: id });
-  };
+      const id = item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId ?? null;
+      if (!id) return Alert.alert('Erro', 'ID do investimento não encontrado.');
+      navigation.navigate('EditarInvestimento', { investmentId: id });
+    };
+
 
   // === EXCLUIR: tenta rota REST e fallback por query ===
   const handleDelete = (item) => {
@@ -236,78 +236,74 @@ const fetchQuotes = async (tickers) => {
 };
 
   const carregarDados = async () => {
+  try {
+    setLoading(true);
+
+    // ✅ agora usa o endpoint que já vem com currentPrice calculado no backend
+    const res = await api.get('/investimentos/todos');
+
+    const lista = Array.isArray(res.data?.investimentos) ? res.data.investimentos : [];
+
+    const withPrices = lista.map((it) => {
+      const qty = Number(it.quantity) || 0;
+      const invested = Number(it.investedValue) || 0;
+      const avg = qty > 0 ? invested / qty : 0;
+      const cur = it.currentPrice != null ? Number(it.currentPrice) : null;
+      const pctVsAvg = cur != null && avg > 0 ? ((cur - avg) / avg) * 100 : null;
+
+
+      return {
+        id: it.id,
+        name: it.name,
+        ticker: it.ticker,
+        quantity: qty,
+        investedValue: invested,
+        avgPrice: avg,
+        currentPrice: cur,
+        pctVsAvg,
+      };
+    });
+
+    setCarteira(withPrices);
+
+    // (opcional) manter os destaques como você já tinha:
     try {
-      setLoading(true);
-      const res = await api.get('/investimentos');
-      const lista = Array.isArray(res.data?.investimentos)
-        ? res.data.investimentos
-        : Array.isArray(res.data)
-        ? res.data
-        : [];
-      const rawBase = (lista || []).map((it) => ({
-        id: it.id ?? it._id ?? it.investmentId ?? it?.investimentoId,
-        name: it.name || it.descricao || '',
-        ticker: normalizeTicker(it.ticker),
-        quantity: Number(it.quantity) || 0,
-        investedValue: Number(it.investedValue) || 0,
-      }));
-
-      const base = await Promise.all(
-        rawBase.map(async (it) => ({ ...it, ticker: await ensureValidTicker(it.ticker) }))
-      );
-
-      // 3) cotações
-      const tickers = Array.from(new Set(base.map((x) => x.ticker).filter(Boolean)));
-      const mapPrices = await fetchQuotes(tickers);
-
-      // 4) calcula preço médio e valorização vs. médio
-      const withPrices = base.map((it) => {
-        const avg = it.quantity > 0 ? it.investedValue / it.quantity : 0;
-        const cur = mapPrices[it.ticker] ?? null;
-        const pctVsAvg = cur != null && avg > 0 ? ((cur - avg) / avg) * 100 : null;
-
-        return {
-          ...it,
-          avgPrice: avg,
-          currentPrice: cur,
-          pctVsAvg,
-        };
-      });
-
-      setCarteira(withPrices);
-
-      // Destaques do dia 
-      try {
-        setLoadingHighlights(true);
-        const { data } = await axios.get(withToken('https://brapi.dev/api/quote/list'));
-        const rows = Array.isArray(data?.stocks) ? data.stocks : [];
-        const hi = rows
-          .map((s) => ({
-            ticker: s?.stock || s?.symbol || '',
-            changePercent: toNum(s?.regularMarketChangePercent) ?? toNum(s?.change),
-          }))
-          .filter((x) => x.ticker && x.changePercent != null)
-          .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
-          .slice(0, 5);
-        setHighlights(hi);
-      } catch {
-        setHighlights([]);
-      } finally {
-        setLoadingHighlights(false);
-      }
-    } catch (err) {
-      if (err.response?.status === 401) {
-        Alert.alert('Sessão expirada', 'Faça login novamente.');
-        handleLogout();
-      } else {
-        Alert.alert('Erro', 'Não foi possível carregar sua carteira.');
-      }
-      setCarteira([]);
+      setLoadingHighlights(true);
+      const { data } = await axios.get('https://brapi.dev/api/quote/list');
+      const rows = Array.isArray(data?.stocks) ? data.stocks : [];
+      const hi = rows
+        .map((s) => ({
+          ticker: s?.stock || s?.symbol || '',
+          changePercent:
+            Number.isFinite(Number(s?.regularMarketChangePercent))
+              ? Number(s?.regularMarketChangePercent)
+              : Number.isFinite(Number(s?.change))
+              ? Number(s?.change)
+              : null,
+        }))
+        .filter((x) => x.ticker && x.changePercent != null)
+        .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
+        .slice(0, 5);
+      setHighlights(hi);
+    } catch {
+      setHighlights([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setLoadingHighlights(false);
     }
-  };
+  } catch (err) {
+    if (err.response?.status === 401) {
+      Alert.alert('Sessão expirada', 'Faça login novamente.');
+      handleLogout();
+    } else {
+      Alert.alert('Erro', 'Não foi possível carregar sua carteira.');
+    }
+    setCarteira([]);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+};
+
 
   useFocusEffect(useCallback(() => { carregarDados(); }, []));
   const onRefresh = () => {
