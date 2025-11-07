@@ -1,9 +1,8 @@
-// src/pages/Home/index.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { Platform, ScrollView, Alert, RefreshControl } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import Feather from 'react-native-vector-icons/Feather'; // << mesmo método do Add
-import axios from 'axios/dist/browser/axios.cjs';
+import Feather from 'react-native-vector-icons/Feather';
+import axios from 'axios';
 import api from '../../services/api';
 
 import {
@@ -35,18 +34,16 @@ import {
   NavCenterLogo,
 } from './styles';
 
-// Se tiver token da BRAPI, coloque aqui (opcional)
+// (opcional) token da BRAPI
 const BRAPI_TOKEN = '';
 const withToken = (url) =>
   BRAPI_TOKEN ? `${url}${url.includes('?') ? '&' : '?'}token=${BRAPI_TOKEN}` : url;
 
-const BRAPI_LIST_URL = withToken('https://brapi.dev/api/quote/list');
-const BRAPI_QUOTE_URL = 'https://brapi.dev/api/quote'; // aceita múltiplos separados por vírgula
+const BRAPI_QUOTE_URL = 'https://brapi.dev/api/quote';
 
 export default function Home() {
   const navigation = useNavigation();
 
-  // garante que a fonte foi carregada (alguns setups de RN bare precisam disso)
   useEffect(() => {
     Feather.loadFont()?.catch?.(() => {});
   }, []);
@@ -66,132 +63,238 @@ export default function Home() {
   const handleNavigateNovo = () => navigation.navigate('NovoInvestimento');
 
   const handleEdit = (item) => {
-    const id = item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId;
+    const id =
+      item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId ?? item?.Id ?? null;
     if (!id) return Alert.alert('Erro', 'ID do investimento não encontrado.');
     navigation.navigate('EditarInvestimento', { investmentId: id });
   };
 
+  // === EXCLUIR: tenta rota REST e fallback por query ===
   const handleDelete = (item) => {
-    const id = item?.id ?? item?._id ?? item?.investmentId ?? item?.investimentoId;
-    if (!id) return Alert.alert('Erro', 'ID do investimento não encontrado.');
+    const rawId =
+      item?.id ??
+      item?._id ??
+      item?.investmentId ??
+      item?.investimentoId ??
+      null;
+
+    const id = rawId != null ? String(rawId) : null;
+
+    if (!id) {
+      return Alert.alert('Erro', 'ID do investimento não encontrado.');
+    }
+
     Alert.alert('Confirmar', 'Deseja remover este investimento?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Remover',
         style: 'destructive',
         onPress: async () => {
+          const url = `/investimentos/${encodeURIComponent(id)}`;
+
+          // Otimista: remove da UI e volta se falhar
+          const prev = carteira;
+          setCarteira((list) =>
+            list.filter((x) =>
+              String(x?.id ?? x?._id ?? x?.investmentId ?? x?.investimentoId) !== id
+            )
+          );
+
           try {
-            await api.delete(`/investimentos/${id}`);
-            await carregarDados();
-          } catch (err) {
-            const msg = err.response?.data?.message || err.response?.data?.error || 'Não foi possível remover.';
+            const resp = await api.delete(url, {
+              timeout: 15000,
+              validateStatus: () => true,
+              headers: { Accept: 'application/json' },
+            });
+
+            const ok = resp?.status === 200 || resp?.status === 202 || resp?.status === 204;
+
+            if (ok) {
+              const msg = resp?.data?.message || 'Investimento removido com sucesso!';
+              Alert.alert('Sucesso', msg);
+              await carregarDados();
+              return;
+            }
+
+            const msg =
+              resp?.data?.message ||
+              resp?.data?.error ||
+              `Falha ao remover (status ${resp?.status ?? '???'})`;
+            setCarteira(prev);
             Alert.alert('Erro', msg);
+          } catch (err) {
+            setCarteira(prev);
+            const human =
+              err?.message?.includes('timeout')
+                ? 'Tempo de espera excedido ao contatar o servidor.'
+                : err?.message || 'Erro ao remover investimento.';
+            Alert.alert('Erro', human);
           }
         },
       },
     ]);
   };
 
+  // ---- utils numéricos
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // ---- normalização e validação de tickers ----
+  // Remove sufixo de fracionário: PETR4F -> PETR4
+  const normalizeTicker = (t) => {
+    const s = String(t || '').toUpperCase().trim();
+    return /^[A-Z]{4}\dF$/.test(s) ? s.slice(0, -1) : s;
+  };
+
+  // Usa a BRAPI para tentar encontrar o símbolo correto e substituir
+  const ensureValidTicker = async (t) => {
+    const q = normalizeTicker(t);
+    try {
+      const { data } = await axios.get(
+        withToken(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(q)}`)
+      );
+      const rows = Array.isArray(data?.stocks) ? data.stocks : [];
+      const hit = rows.find((x) => x?.stock) || null;
+      if (hit) {
+        return String(hit.stock).toUpperCase().replace('.SA', '');
+      }
+    } catch {}
+    return q; // se nada achou, mantém (pode resultar em "--" depois)
+  };
+
+  // === COTAÇÕES ROBUSTAS: batch + .SA + lookup + histórico ===
+  // === COTAÇÕES: força .SA, depois sem .SA, e por fim resolve via search ===
+const fetchQuotes = async (tickers) => {
+  if (!Array.isArray(tickers) || tickers.length === 0) return {};
+
+  const uniq = Array.from(new Set(
+    tickers.map(t => String(t || '').toUpperCase().trim()).filter(Boolean)
+  ));
+
+  const getPriceFromResult = (r) => {
+    const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+    const direct =
+      n(r?.regularMarketPrice) ??
+      n(r?.close) ??
+      n(r?.price) ??
+      n(r?.regularMarketPreviousClose);
+    if (direct != null) return direct;
+
+    const hist = Array.isArray(r?.historicalDataPrice) ? r.historicalDataPrice : [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const p = n(hist[i]?.close);
+      if (p != null) return p;
+    }
+    return null;
+  };
+
+  const getOne = async (sym) => {
+    // tenta com .SA primeiro, depois sem .SA
+    const tries = [sym.includes('.') ? sym : `${sym}.SA`, sym];
+    for (const trySym of tries) {
+      try {
+        const url = withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(trySym)}?range=1mo&interval=1d`);
+        const { data } = await axios.get(url);
+        const r = Array.isArray(data?.results) ? data.results[0] : null;
+        const p = r ? getPriceFromResult(r) : null;
+        if (p != null) return { price: p, symbolUsed: trySym };
+      } catch {}
+    }
+
+    try {
+      const sUrl = withToken(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(sym)}`);
+      const { data: sdata } = await axios.get(sUrl);
+      const rows = Array.isArray(sdata?.stocks) ? sdata.stocks : [];
+      const hit = rows.find(x => x?.stock) || null;
+      if (hit) {
+        const found = String(hit.stock).toUpperCase();
+        const url2 = withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(found)}?range=1mo&interval=1d`);
+        const { data: d2 } = await axios.get(url2);
+        const r2 = Array.isArray(d2?.results) ? d2.results[0] : null;
+        const p2 = r2 ? getPriceFromResult(r2) : null;
+        if (p2 != null) return { price: p2, symbolUsed: found };
+      }
+    } catch {}
+
+    return { price: null, symbolUsed: null }; 
+  };
+
+  const out = {};
+  for (const t of uniq) {
+    const { price, symbolUsed } = await getOne(t);
+    if (price != null) {
+      // normaliza a chave sem .SA
+      const key = String(symbolUsed || t).toUpperCase().replace('.SA', '');
+      out[key] = price;
+    }
+    // evita rate limit
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  return out;
+};
+
   const carregarDados = async () => {
     try {
       setLoading(true);
       const res = await api.get('/investimentos');
-
       const lista = Array.isArray(res.data?.investimentos)
         ? res.data.investimentos
-        : (Array.isArray(res.data) ? res.data : []);
-
-      const base = (lista || []).map(it => ({
+        : Array.isArray(res.data)
+        ? res.data
+        : [];
+      const rawBase = (lista || []).map((it) => ({
         id: it.id ?? it._id ?? it.investmentId ?? it?.investimentoId,
         name: it.name || it.descricao || '',
-        ticker: String(it.ticker || '').toUpperCase(),
+        ticker: normalizeTicker(it.ticker),
         quantity: Number(it.quantity) || 0,
         investedValue: Number(it.investedValue) || 0,
       }));
 
-      // === BRAPI em batch, com .SA e fallback ===
-      const tickers = Array.from(new Set(base.map(x => x.ticker).filter(Boolean)));
-      let quoteMap = {};
+      const base = await Promise.all(
+        rawBase.map(async (it) => ({ ...it, ticker: await ensureValidTicker(it.ticker) }))
+      );
 
-      if (tickers.length) {
-        const makeUrl = (syms) =>
-          withToken(`${BRAPI_QUOTE_URL}/${syms.map(encodeURIComponent).join(',')}?range=1d&interval=1d`);
+      // 3) cotações
+      const tickers = Array.from(new Set(base.map((x) => x.ticker).filter(Boolean)));
+      const mapPrices = await fetchQuotes(tickers);
 
-        try {
-          // 1) batch direto
-          let { data } = await axios.get(makeUrl(tickers));
-          let results = Array.isArray(data?.results) ? data.results : [];
-
-          // 2) tenta com .SA se vazio
-          if (!results.length) {
-            const withSa = tickers.map(t => (t.endsWith('.SA') ? t : `${t}.SA`));
-            const respSa = await axios.get(makeUrl(withSa));
-            results = Array.isArray(respSa?.data?.results) ? respSa.data.results : [];
-          }
-
-          // 3) fallback 1-a-1
-          if (!results.length) {
-            for (const t of tickers) {
-              try {
-                const r1 = await axios.get(withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(t)}?range=1d&interval=1d`));
-                if (Array.isArray(r1?.data?.results) && r1.data.results[0]) {
-                  results.push(r1.data.results[0]);
-                  continue;
-                }
-                const tSA = t.endsWith('.SA') ? t : `${t}.SA`;
-                const r2 = await axios.get(withToken(`${BRAPI_QUOTE_URL}/${encodeURIComponent(tSA)}?range=1d&interval=1d`));
-                if (Array.isArray(r2?.data?.results) && r2.data.results[0]) {
-                  results.push(r2.data.results[0]);
-                }
-              } catch {}
-            }
-          }
-
-          // monta o mapa tolerante
-          results.forEach(r => {
-            const symRaw = String(r.symbol || r.stock || '').toUpperCase();
-            const sym = symRaw.replace('.SA', '');
-
-            const price =
-              toNum(r.regularMarketPrice) ??
-              toNum(r.close) ??
-              toNum(r.regularMarketPreviousClose) ??
-              null;
-
-            let pct = toNum(r.regularMarketChangePercent) ?? null;
-            if (pct == null && isFiniteNum(price) && isFiniteNum(r.regularMarketPreviousClose)) {
-              const prev = Number(r.regularMarketPreviousClose);
-              if (prev) pct = ((price / prev) - 1) * 100;
-            }
-            if (pct == null && isFiniteNum(r.change)) {
-              pct = Number(r.change);
-            }
-
-            if (sym) {
-              quoteMap[sym] = {
-                currentPrice: isFiniteNum(price) ? price : null,
-                changePercent: isFiniteNum(pct) ? pct : null,
-              };
-            }
-          });
-
-        } catch (e) {
-          quoteMap = {};
-        }
-      }
-
-      const withPrices = base.map(it => {
+      // 4) calcula preço médio e valorização vs. médio
+      const withPrices = base.map((it) => {
         const avg = it.quantity > 0 ? it.investedValue / it.quantity : 0;
-        const q = quoteMap[it.ticker] || {};
+        const cur = mapPrices[it.ticker] ?? null;
+        const pctVsAvg = cur != null && avg > 0 ? ((cur - avg) / avg) * 100 : null;
+
         return {
           ...it,
           avgPrice: avg,
-          currentPrice: isFiniteNum(q.currentPrice) ? q.currentPrice : null,
-          changePercent: isFiniteNum(q.changePercent) ? q.changePercent : null,
+          currentPrice: cur,
+          pctVsAvg,
         };
       });
 
       setCarteira(withPrices);
+
+      // Destaques do dia 
+      try {
+        setLoadingHighlights(true);
+        const { data } = await axios.get(withToken('https://brapi.dev/api/quote/list'));
+        const rows = Array.isArray(data?.stocks) ? data.stocks : [];
+        const hi = rows
+          .map((s) => ({
+            ticker: s?.stock || s?.symbol || '',
+            changePercent: toNum(s?.regularMarketChangePercent) ?? toNum(s?.change),
+          }))
+          .filter((x) => x.ticker && x.changePercent != null)
+          .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
+          .slice(0, 5);
+        setHighlights(hi);
+      } catch {
+        setHighlights([]);
+      } finally {
+        setLoadingHighlights(false);
+      }
     } catch (err) {
       if (err.response?.status === 401) {
         Alert.alert('Sessão expirada', 'Faça login novamente.');
@@ -207,34 +310,6 @@ export default function Home() {
   };
 
   useFocusEffect(useCallback(() => { carregarDados(); }, []));
-
-  useEffect(() => {
-    const fetchHighlights = async () => {
-      try {
-        setLoadingHighlights(true);
-        const { data } = await axios.get(BRAPI_LIST_URL);
-        const rows = Array.isArray(data?.stocks) ? data.stocks : [];
-        const list = rows
-          .map(s => ({
-            ticker: s?.stock || s?.symbol || '',
-            changePercent:
-              isFiniteNum(s?.regularMarketChangePercent)
-                ? Number(s.regularMarketChangePercent)
-                : (isFiniteNum(s?.change) ? Number(s.change) : null),
-          }))
-          .filter(x => x.ticker && x.changePercent !== null)
-          .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
-          .slice(0, 5);
-        setHighlights(list);
-      } catch {
-        setHighlights([]);
-      } finally {
-        setLoadingHighlights(false);
-      }
-    };
-    fetchHighlights();
-  }, []);
-
   const onRefresh = () => {
     setRefreshing(true);
     carregarDados();
@@ -276,17 +351,20 @@ export default function Home() {
               ) : carteira.length === 0 ? (
                 <EmptyTableText>Sem ativos na carteira.</EmptyTableText>
               ) : (
-                carteira.map(item => {
+                carteira.map((item) => {
                   const avg = Number(item.avgPrice) || 0;
-                  const cur = isFiniteNum(item.currentPrice) ? Number(item.currentPrice) : null;
-                  const chg = isFiniteNum(item.changePercent) ? Number(item.changePercent) : null;
-                  const chgStr = chg != null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%` : '--';
+                  const cur = item.currentPrice != null ? Number(item.currentPrice) : null;
+                  const pct = item.pctVsAvg;
+                  const pctStr = pct == null ? '--' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+
                   return (
                     <TableRow key={item.id || item.ticker}>
                       <TableCell flex={1}>{item.ticker}</TableCell>
                       <TableCell flex={1.2}>R$ {avg.toFixed(2)}</TableCell>
                       <TableCell flex={1.2}>{cur != null ? `R$ ${cur.toFixed(2)}` : '--'}</TableCell>
-                      <TableCellValorizacao flex={1.2} positive={(chg ?? 0) >= 0}>{chgStr}</TableCellValorizacao>
+                      <TableCellValorizacao flex={1.2} positive={(pct ?? 0) >= 0}>
+                        {pctStr}
+                      </TableCellValorizacao>
                       <TableCellAtivos flex={0.9}>
                         <IconButton onPress={() => handleEdit(item)}>
                           <Feather name="edit" size={18} color="#56949F" />
@@ -301,8 +379,7 @@ export default function Home() {
               )}
             </Table>
           </Card>
-
-          {/* DESTAQUE DO DIA */}
+          
           <Card>
             <CardTitle>Destaque do dia:</CardTitle>
             <Table>
@@ -316,13 +393,15 @@ export default function Home() {
               ) : highlights.length === 0 ? (
                 <EmptyTableText>Nenhum destaque hoje.</EmptyTableText>
               ) : (
-                highlights.map(h => {
+                highlights.map((h) => {
                   const positive = h.changePercent >= 0;
                   const formatted = `${positive ? '+' : ''}${h.changePercent.toFixed(2)}%`;
                   return (
                     <TableRow key={h.ticker}>
                       <TableCell flex={1}>{h.ticker}</TableCell>
-                      <TableCellValorizacao flex={1} positive={positive}>{formatted}</TableCellValorizacao>
+                      <TableCellValorizacao flex={1} positive={positive}>
+                        {formatted}
+                      </TableCellValorizacao>
                     </TableRow>
                   );
                 })
@@ -349,13 +428,4 @@ export default function Home() {
       </BottomNav>
     </Background>
   );
-}
-
-// helpers
-function toNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function isFiniteNum(v) {
-  return typeof v === 'number' && Number.isFinite(v);
 }
