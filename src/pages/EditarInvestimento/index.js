@@ -271,52 +271,56 @@ export default function EditarInvestimento() {
   const handleNavigateHome = () => navigation.navigate('Home');
   const handleNavigateDashboard = () => console.log('Navegar para Dashboard');
 
-  const handleSalvar = async () => {
-    if (!currentId) { Alert.alert('Erro', 'ID do investimento não informado.'); return; }
-    if (!nome || !ticker || !quantidade || !valorInvestido || !dataInvestimento) {
-      Alert.alert('Erro', 'Por favor, preencha todos os campos.'); return;
-    }
+// dentro do EditarInvestimento/index.js
 
-    const qty = Number(quantidade);
-    const invested = parseFloat(String(valorInvestido).replace(',', '.'));
-    if (!Number.isFinite(qty) || qty <= 0) {
-      Alert.alert('Atenção', 'Quantidade deve ser um número positivo.');
-      return;
-    }
-    if (!Number.isFinite(invested) || invested <= 0) {
-      Alert.alert('Atenção', 'Valor investido deve ser um número positivo.');
-      return;
-    }
+const handleSalvar = async () => {
+  if (!currentId) { Alert.alert('Erro', 'ID do investimento não informado.'); return; }
+  if (!nome || !ticker || !quantidade || !valorInvestido || !dataInvestimento) {
+    Alert.alert('Erro', 'Por favor, preencha todos os campos.'); return;
+  }
 
-    const okDate = /^\d{4}-\d{2}-\d{2}$/.test(dataInvestimento);
-    if (!okDate) {
-      Alert.alert('Data inválida', 'Use o formato AAAA-MM-DD (ex.: 2025-10-28).');
-      return;
-    }
-    const dateISO = new Date(`${dataInvestimento}T00:00:00Z`).toISOString();
+  const qty = Number(quantidade);
+  const invested = parseFloat(String(valorInvestido).replace(',', '.'));
+  if (!Number.isFinite(qty) || qty <= 0) {
+    Alert.alert('Atenção', 'Quantidade deve ser um número positivo.');
+    return;
+  }
+  if (!Number.isFinite(invested) || invested < 0) {
+    Alert.alert('Atenção', 'Valor investido deve ser um número válido.');
+    return;
+  }
 
-    setSaving(true);
-    try {
-      const payload = {
-        name: nome.trim(),
-        ticker: ticker.trim().toUpperCase(),
-        quantity: qty,
-        investedValue: invested,
-        dateInvested: dateISO, // ou a string YYYY-MM-DD, se o back preferir
-      };
+  const okDate = /^\d{4}-\d{2}-\d{2}$/.test(dataInvestimento);
+  if (!okDate) {
+    Alert.alert('Data inválida', 'Use o formato AAAA-MM-DD (ex.: 2025-10-28).');
+    return;
+  }
+  const dateISO = new Date(`${dataInvestimento}T00:00:00Z`).toISOString();
 
-      try { await api.put(`/investimentos/${currentId}`, payload); }
-      catch { await api.patch(`/investimentos/${currentId}`, payload); }
+  setSaving(true);
+  try {
+    const payload = {
+      name: nome.trim(),
+      ticker: ticker.trim().toUpperCase(),
+      quantity: qty,
+      investedValue: invested,
+      dateInvested: dateISO,
+    };
 
-      Alert.alert('Sucesso', 'Investimento atualizado!');
-      navigation.navigate('Home');
-    } catch (err) {
-      const msg = err?.response?.data?.message || err.message || 'Não foi possível atualizar.';
-      Alert.alert('Erro', msg);
-    } finally {
-      setSaving(false);
-    }
-  };
+    // Se você adicionou a rota PATCH, pode manter este fallback; se só tiver PUT, deixe só o PUT.
+    try { await api.put(`/investimentos/${currentId}`, payload); }
+    catch { await api.patch?.(`/investimentos/${currentId}`, payload); }
+
+    Alert.alert('Sucesso', 'Investimento atualizado!');
+    navigation.goBack(); // Home tem useFocusEffect -> recarrega
+  } catch (err) {
+    const msg = err?.response?.data?.message || err.message || 'Não foi possível atualizar.';
+    Alert.alert('Erro', msg);
+  } finally {
+    setSaving(false);
+  }
+};
+
 
   return (
     <TouchableWithoutFeedback onPress={() => { setShowNameSuggestions(false); setShowTickerSuggestions(false); Keyboard.dismiss(); }}>
